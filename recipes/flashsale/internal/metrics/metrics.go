@@ -6,22 +6,26 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 // Metrics bundles the counters/histograms/gauges emitted by the flashsale recipe.
+//
+// Every variant-sensitive metric carries an `adapter` label (see
+// CONVENTIONS.md § 2) so Grafana panels can split the three adapters
+// side-by-side on one dashboard.
 type Metrics struct {
-	OversellTotal    prometheus.Counter
+	OversellTotal    *prometheus.CounterVec   // labels: adapter
 	CheckoutAttempts *prometheus.CounterVec   // labels: adapter, outcome (ok|out_of_stock|not_found|error)
 	CheckoutLatency  *prometheus.HistogramVec // labels: adapter
-	StockRemaining   *prometheus.GaugeVec     // labels: product_id
+	StockRemaining   *prometheus.GaugeVec     // labels: adapter, product_id
 }
 
 // New registers all metrics on reg and returns the bundle.
 func New(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		OversellTotal: prometheus.NewCounter(prometheus.CounterOpts{
+		OversellTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "cookbook",
 			Subsystem: "flashsale",
 			Name:      "oversell_total",
-			Help:      "Number of successful checkouts where stock went negative. MUST be 0 for correct adapters.",
-		}),
+			Help:      "Successful checkouts beyond the seeded stock, per adapter. MUST be 0 for correct adapters.",
+		}, []string{"adapter"}),
 		CheckoutAttempts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "cookbook",
 			Subsystem: "flashsale",
@@ -39,8 +43,8 @@ func New(reg prometheus.Registerer) *Metrics {
 			Namespace: "cookbook",
 			Subsystem: "flashsale",
 			Name:      "stock_remaining",
-			Help:      "Stock remaining for each product (sampled after every successful checkout).",
-		}, []string{"product_id"}),
+			Help:      "Stock remaining per (adapter, product) — sampled after every successful checkout.",
+		}, []string{"adapter", "product_id"}),
 	}
 	reg.MustRegister(m.OversellTotal, m.CheckoutAttempts, m.CheckoutLatency, m.StockRemaining)
 

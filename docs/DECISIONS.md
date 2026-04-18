@@ -149,6 +149,101 @@ this file is how architectural drift happens.
   fragments migrations tooling. Schema-per-recipe gives us namespace
   isolation with one `golang-migrate` command and one connection string.
 
+## 13. Full DDD split: handler → service → repository → DB/Redis
+
+- **Chose:** the full DDD call path in every recipe's `internal/` —
+  - `dto/` — HTTP wire shapes (one file per endpoint pair)
+  - `entity/` — persistence-mapped types (one file per entity)
+  - `domain/` — typed sentinel errors & cross-cutting rules
+  - `routes/` — single `Register(e, handler)` function = the API surface
+  - `handler/` — thin HTTP binding (bind DTO → call service → render DTO)
+  - `service/` — application service: orchestration, metric bookkeeping,
+    in-memory invariants (e.g. per-(kind, product) oversell tracking)
+  - `repository/` — persistence + atomicity primitives. Interface +
+    concrete implementations in one package (matches go-micro-commerce).
+  - `config/`, `metrics/` — infra glue
+- **Rejected:** both extremes
+  - **inline-everything** — handler calling adapters directly, inline
+    DTO structs, no service layer. Works for tiny recipes but doesn't
+    scale past 3 endpoints and collapses the teaching layers.
+  - **the full go-micro-commerce superset** (`mapper/`, `validation/`,
+    `httperror/`, `provider/`, `middleware/`, `constant/`, `utils/`) —
+    each adds a file per recipe for small recipes. Add per-recipe only
+    when that layer genuinely earns its keep.
+- **Reason:** the `handler → service → repository` path is the DDD
+  story a learner should see on every recipe. It makes three
+  distinctions explicit:
+  1. **HTTP vs application** — handler is thin plumbing; service holds
+     use-case logic.
+  2. **Application vs persistence** — service calls a repository
+     interface; it doesn't know SQL/Redis.
+  3. **Aggregate-sized repository** — the `Inventory` repository
+     intentionally couples stock and order writes (DDD aggregate
+     pattern) because atomicity spans both; splitting into
+     `StockRepository` + `OrderRepository` would destroy atomicity
+     (exactly the dual-write anti-pattern `outbox` teaches).
+
+  For the flashsale recipe, a learner reads the three repository files
+  (`naive.go`, `pg_cond.go`, `redis_lua.go`) to see the atomicity
+  mechanism itself, then reads `service/checkout_service.go` to see
+  how orchestration/metrics/invariants sit above it. That's cleaner
+  than any flatter alternative.
+
+  **When to add MORE layers** (per-recipe decision, not a global
+  convention):
+  - Add `mapper/` only when DTO and Entity shapes genuinely differ
+    (rare — almost everything in our recipes maps 1:1).
+  - Add `validation/` only when validators are shared across 3+
+    handlers.
+  - Add `middleware/`, `httperror/` only when two or more recipes
+    benefit — at that point promote to `pkg/` instead.
+
+  Document any deviation in the recipe's `RECIPE.md` with a one-line
+  justification.
+
+- **Revisit trigger:** if `service/` becomes a pure pass-through
+  (every method is one line delegating to the repository), collapse
+  it back into the handler for that recipe. Current flashsale
+  service is NOT a pass-through — it owns oversell tracking and
+  metric attribution, which don't belong in the handler.
+
+---
+
+## 14. No generic `constant/` package — extract typed constants near their use
+
+- **Chose:** define constants in the package where they're used. When a
+  value is shared across packages (e.g. metric label values used in
+  both `service/` and `main.go`), extract them as a **typed constant
+  group in the package that owns the semantic** — e.g. metric-label
+  outcomes live in `metrics/outcome.go`, not a generic `constant/`.
+- **Rejected:** a top-level `recipes/<name>/internal/constant/`
+  package holding all magic values from the recipe (matching
+  go-micro-commerce's `product-service/internal/constant/`).
+- **Reason:** a generic constant package becomes a junk drawer — HTTP
+  timeouts, error-message strings, Kafka topic names, metric label
+  values, and schema names all dumped together. Each of those values
+  has a natural home in the package that owns its meaning (HTTP
+  timeouts in `pkg/httpserver`, metric label values in `metrics/`,
+  error sentinels already in `domain/errors.go`, adapter kinds
+  already typed in `repository/`). Locality wins here.
+
+  The reference repo's `constant/` package earns its keep for a
+  production microservice with dozens of magic values that need to
+  stay consistent across many packages, but a learning recipe has a
+  small enough surface that locality + typed constants are strictly
+  better.
+
+  **The one extraction we DO make:** metric label values used in more
+  than one package become typed constants (e.g. `metrics.Outcome`
+  enum with `OutcomeOK`, `OutcomeOutOfStock`, etc. plus
+  `metrics.AllOutcomes` slice). Prevents silent "ghost series" bugs
+  when a typo in one place splits a metric into two series.
+
+- **Revisit trigger:** if a recipe ends up with the same string
+  literal repeated in 3+ packages, extract a typed constant into the
+  most semantically-appropriate package (NOT a catch-all
+  `constant/`).
+
 ---
 
 ## When to revise a decision

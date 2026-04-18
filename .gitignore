@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+*.env
 
 # Go test binary
 *.test

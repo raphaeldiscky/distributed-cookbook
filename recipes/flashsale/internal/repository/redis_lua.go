@@ -1,4 +1,4 @@
-package stock
+package repository
 
 import (
 	"context"
@@ -48,8 +48,8 @@ func NewRedisLua(pool *pgxpool.Pool, rdb *redis.Client) *RedisLuaAdapter {
 	}
 }
 
-// Name returns the adapter label used for metrics.
-func (a *RedisLuaAdapter) Name() Adapter { return AdapterRedisLua }
+// Kind returns the repository kind used for metrics labels.
+func (a *RedisLuaAdapter) Kind() Kind { return KindRedisLua }
 
 // Decrement runs the atomic Lua script in Redis; the order row is a
 // best-effort post-write into Postgres (the dual-write problem).

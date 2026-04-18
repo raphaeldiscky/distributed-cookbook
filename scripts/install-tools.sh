@@ -44,6 +44,14 @@ else
     echo "migrate already installed"
 fi
 
+# air — hot-reload loop used by `task run RECIPE=...`
+if ! command -v air &> /dev/null; then
+    echo "Installing air..."
+    go install github.com/air-verse/air@latest
+else
+    echo "air already installed"
+fi
+
 # k6 — load testing, used by `task load_test RECIPE=...`
 if ! command -v k6 &> /dev/null; then
     echo "k6 not found. Install via your package manager, e.g.:"

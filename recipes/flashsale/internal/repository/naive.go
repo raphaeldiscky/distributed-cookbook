@@ -1,4 +1,4 @@
-package stock
+package repository
 
 import (
 	"context"
@@ -24,8 +24,8 @@ func NewNaive(pool *pgxpool.Pool) *NaiveAdapter {
 	return &NaiveAdapter{pool: pool}
 }
 
-// Name returns the adapter label used for metrics.
-func (a *NaiveAdapter) Name() Adapter { return AdapterNaive }
+// Kind returns the repository kind used for metrics labels.
+func (a *NaiveAdapter) Kind() Kind { return KindNaive }
 
 // Decrement reads stock, checks in Go, then writes the computed new value — racy on purpose.
 func (a *NaiveAdapter) Decrement(ctx context.Context, productID int64, qty int) (Result, error) {

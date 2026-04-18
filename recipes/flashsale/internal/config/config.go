@@ -6,22 +6,24 @@ import (
 	"strconv"
 
 	pkgconfig "github.com/raphaeldiscky/distributed-cookbook/pkg/config"
-	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/stock"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/repository"
 )
 
 // Config is the flashsale recipe's full config, combining shared + recipe-local settings.
 type Config struct {
-	Shared  pkgconfig.Shared
-	Adapter stock.Adapter // RECIPE_FLASHSALE_ADAPTER: naive|pg_cond|redis_lua
-	Port    int           // RECIPE_FLASHSALE_PORT, default 8081
+	Shared      pkgconfig.Shared
+	DefaultKind repository.Kind // RECIPE_FLASHSALE_ADAPTER: naive|pg_cond|redis_lua
+	Port        int             // RECIPE_FLASHSALE_PORT, default 8081
 }
 
 // Load pulls env vars and applies defaults.
 func Load() Config {
 	return Config{
-		Shared:  pkgconfig.LoadShared(),
-		Adapter: stock.Adapter(getenv("RECIPE_FLASHSALE_ADAPTER", string(stock.AdapterPgCond))),
-		Port:    getint("RECIPE_FLASHSALE_PORT", 8081),
+		Shared: pkgconfig.LoadShared(),
+		DefaultKind: repository.Kind(
+			getenv("RECIPE_FLASHSALE_ADAPTER", string(repository.KindPgCond)),
+		),
+		Port: getint("RECIPE_FLASHSALE_PORT", 8081),
 	}
 }
 

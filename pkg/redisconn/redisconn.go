@@ -3,6 +3,7 @@ package redisconn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 )
 
 // New creates a redis.Client against addr (e.g. "localhost:6379").
+// On failure, any Close error from the partially-constructed client is
+// joined into the returned error via errors.Join — callers can inspect
+// both via errors.Is/As without losing either.
 func New(ctx context.Context, addr string) (*redis.Client, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         addr,
@@ -20,18 +24,20 @@ func New(ctx context.Context, addr string) (*redis.Client, error) {
 		PoolSize:     25,
 	})
 	if err := redisotel.InstrumentTracing(client); err != nil {
-		client.Close() //nolint:errcheck,gosec // cleanup path — construction error already dominates
-
-		return nil, fmt.Errorf("redisconn: instrument tracing: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("redisconn: instrument tracing: %w", err),
+			client.Close(),
+		)
 	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	if err := client.Ping(pingCtx).Err(); err != nil {
-		client.Close() //nolint:errcheck,gosec // cleanup path — ping error already dominates
-
-		return nil, fmt.Errorf("redisconn: ping: %w", err)
+		return nil, errors.Join(
+			fmt.Errorf("redisconn: ping: %w", err),
+			client.Close(),
+		)
 	}
 
 	return client, nil

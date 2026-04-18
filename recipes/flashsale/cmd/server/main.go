@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 
+	"github.com/raphaeldiscky/distributed-cookbook/pkg/closer"
 	"github.com/raphaeldiscky/distributed-cookbook/pkg/httpserver"
 	"github.com/raphaeldiscky/distributed-cookbook/pkg/logger"
 	"github.com/raphaeldiscky/distributed-cookbook/pkg/pgconn"
@@ -24,7 +25,9 @@ import (
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/config"
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/handler"
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/metrics"
-	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/stock"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/repository"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/routes"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/service"
 )
 
 const serviceName = "flashsale"
@@ -40,7 +43,7 @@ func run() error {
 	cfg := config.Load()
 	log := logger.New(cfg.Shared.LogLevel)
 	log.Info("starting flashsale",
-		slog.String("adapter", string(cfg.Adapter)),
+		slog.String("default_kind", string(cfg.DefaultKind)),
 		slog.Int("port", cfg.Port),
 	)
 
@@ -69,11 +72,20 @@ func run() error {
 		return fmt.Errorf("redis: %w", err)
 	}
 
-	defer func() { rdb.Close() }() //nolint:errcheck,gosec // process-exit cleanup; error cannot be acted on
+	defer closer.LogOnError(rdb, log, "redis")
 
-	dec, err := stock.New(cfg.Adapter, pool, rdb)
-	if err != nil {
-		return fmt.Errorf("stock adapter: %w", err)
+	// Build every Inventory implementation up front. The server holds all
+	// three and routes per-request via POST /checkout/:adapter. cfg.DefaultKind
+	// is the fallback when the client omits the :adapter path segment.
+	inventories := make(map[repository.Kind]repository.Inventory, 3)
+
+	for _, kind := range []repository.Kind{repository.KindNaive, repository.KindPgCond, repository.KindRedisLua} {
+		inv, err := repository.New(kind, pool, rdb)
+		if err != nil {
+			return fmt.Errorf("inventory %q: %w", kind, err)
+		}
+
+		inventories[kind] = inv
 	}
 
 	reg := prometheus.NewRegistry()
@@ -83,8 +95,24 @@ func run() error {
 	)
 	m := metrics.New(reg)
 
-	e := httpserver.New(serviceName, reg)
-	handler.NewCheckout(dec, m, log).Register(e)
+	// Pre-touch every (kind, outcome) label combination so the series
+	// exist at value 0 from the moment Prometheus scrapes, before any
+	// traffic. Dashboard panels render all three kinds from second one.
+	for kind := range inventories {
+		k := string(kind)
+		m.OversellTotal.WithLabelValues(k)
+		m.CheckoutLatency.WithLabelValues(k)
+
+		for _, outcome := range metrics.AllOutcomes {
+			m.CheckoutAttempts.WithLabelValues(k, string(outcome))
+		}
+	}
+
+	svc := service.NewCheckout(inventories, cfg.DefaultKind, m, log)
+	checkoutHandler := handler.NewCheckout(svc, log)
+
+	e := httpserver.New(serviceName, reg, log)
+	routes.Register(e, checkoutHandler)
 
 	return httpserver.Run(ctx, e, fmt.Sprintf(":%d", cfg.Port), log)
 }

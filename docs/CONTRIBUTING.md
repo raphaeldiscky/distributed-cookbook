@@ -99,6 +99,61 @@ Short version: recipe name is lowercase kebab-case (`service-mesh-cilium`);
 everything derived from it swaps hyphens for underscores where the target
 language/system requires (`service_mesh_cilium`).
 
+## Internal layout — full DDD call path
+
+The cookbook uses the **full DDD call path** `handler → service →
+repository → DB/Redis` so every recipe reads the same way:
+
+```
+recipes/foo/internal/
+├── config/           # env var loading
+├── dto/              # HTTP wire shapes (one file per endpoint pair)
+│   ├── checkout.go
+│   ├── seed.go
+│   ├── stock.go
+│   └── error.go
+├── entity/           # persistence-mapped types (one file per entity)
+│   ├── product.go
+│   └── order.go
+├── domain/           # typed sentinel errors & cross-cutting rules
+│   └── errors.go
+├── repository/       # Inventory interface + implementations in ONE pkg
+│   ├── inventory.go  # interface, Kind type, constants, Result
+│   ├── naive.go      # concrete impl 1
+│   ├── pg_cond.go    # concrete impl 2
+│   ├── redis_lua.go  # concrete impl 3
+│   └── factory.go    # New(kind, ...) → Inventory
+├── service/          # application service: orchestration + invariants
+│   └── checkout_service.go
+├── handler/          # thin HTTP binding (bind DTO → call service → render DTO)
+│   └── checkout.go
+├── routes/           # single Register(e, handler) — the API surface
+│   └── routes.go
+└── metrics/          # Prometheus metrics (no globals)
+```
+
+This mirrors go-micro-commerce's production layout. The heavier pieces
+still rejected by default (and documented in
+[DECISIONS.md § 13](./DECISIONS.md#13-full-ddd-split-handler--service--repository--dbredis))
+are `mapper/`, `validation/`, `httperror/`, `provider/`, `middleware/`,
+`constant/`, `utils/` — add them per-recipe only when they genuinely
+earn their keep.
+
+**Repository rule of thumb.** One repository interface per **aggregate**,
+not per table. For flashsale, `Inventory` couples stock-and-order
+because they must be written atomically — splitting them into
+`StockRepository` + `OrderRepository` would reintroduce the dual-write
+anti-pattern the outbox recipe exists to teach. If your recipe's
+aggregate really is one entity (a user, a ticket), then one-to-one
+interface-to-entity is fine.
+
+**Service rule of thumb.** If every method on your service is a
+one-line pass-through to the repository, collapse the service back
+into the handler — your recipe doesn't need application-layer logic
+yet. Flashsale's service earns its keep by owning oversell tracking
+and metric attribution, which don't belong in the handler or the
+repository.
+
 ---
 
 ## Port allocation

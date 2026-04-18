@@ -16,9 +16,6 @@ scrape_configs:
     static_configs:
       - targets: ["otel-collector:8889"]
 
-  # k6 prometheus pull endpoint (when --out experimental-prometheus-rw is used,
-  # k6 also exposes /metrics on :6565 if started with --out=prometheus)
-  - job_name: k6
-    honor_labels: true
-    static_configs:
-      - targets: ["host.docker.internal:6565"]
+  # k6 uses remote_write (see K6_PROMETHEUS_RW_SERVER_URL in taskfile.yml).
+  # Prometheus's --web.enable-remote-write-receiver accepts it at /api/v1/write.
+  # No scrape target needed.

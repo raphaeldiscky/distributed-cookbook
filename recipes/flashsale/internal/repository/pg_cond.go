@@ -1,4 +1,4 @@
-package stock
+package repository
 
 import (
 	"context"
@@ -23,8 +23,8 @@ func NewPgCond(pool *pgxpool.Pool) *PgCondAdapter {
 	return &PgCondAdapter{pool: pool}
 }
 
-// Name returns the adapter label used for metrics.
-func (a *PgCondAdapter) Name() Adapter { return AdapterPgCond }
+// Kind returns the repository kind used for metrics labels.
+func (a *PgCondAdapter) Kind() Kind { return KindPgCond }
 
 // Decrement runs the atomic check-and-decrement via a single conditional UPDATE.
 func (a *PgCondAdapter) Decrement(ctx context.Context, productID int64, qty int) (Result, error) {

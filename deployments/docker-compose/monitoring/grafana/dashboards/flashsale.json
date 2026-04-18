@@ -4,157 +4,249 @@
   "schemaVersion": 39,
   "timezone": "",
   "refresh": "5s",
-  "time": { "from": "now-5m", "to": "now" },
+  "time": { "from": "now-2m", "to": "now" },
   "tags": ["recipe", "flashsale"],
+  "description": "One server, three adapters. Run one load test per adapter in sequence; each row shows per-adapter outcomes side by side.",
   "panels": [
     {
       "type": "stat",
-      "title": "Oversell count (hero)",
+      "title": "Oversells · naive",
       "id": 1,
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
               { "color": "red", "value": 1 }
             ]
-          },
-          "color": { "mode": "thresholds" }
+          }
         }
       },
       "options": {
         "colorMode": "background",
         "graphMode": "area",
         "textMode": "value",
+        "justifyMode": "center",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
       },
       "targets": [
         {
-          "expr": "sum(cookbook_flashsale_oversell_total)",
+          "expr": "sum(increase(cookbook_flashsale_oversell_total{adapter=\"naive\"}[$__range]))",
           "refId": "A"
         }
       ]
     },
     {
-      "type": "gauge",
-      "title": "Stock remaining",
+      "type": "stat",
+      "title": "Oversells · pg_cond",
       "id": 2,
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "min": -100,
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(cookbook_flashsale_oversell_total{adapter=\"pg_cond\"}[$__range]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Oversells · redis_lua",
+      "id": 3,
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(cookbook_flashsale_oversell_total{adapter=\"redis_lua\"}[$__range]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Stock remaining (per adapter · product)",
+      "id": 4,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "min": -50,
           "max": 200,
+          "color": { "mode": "thresholds" },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "red", "value": null },
               { "color": "yellow", "value": 0 },
-              { "color": "green", "value": 1 }
+              { "color": "green", "value": 20 }
             ]
           }
         }
       },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
       "targets": [
         {
-          "expr": "cookbook_flashsale_stock_remaining",
-          "legendFormat": "product {{product_id}}",
+          "expr": "cookbook_flashsale_stock_remaining{product_id!=\"0\"}",
+          "legendFormat": "{{adapter}} · p{{product_id}}",
           "refId": "A"
         }
       ]
     },
     {
       "type": "timeseries",
-      "title": "Checkout RPS by outcome",
-      "id": 3,
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "title": "Checkout RPS by adapter + outcome",
+      "id": 5,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "stacking": { "mode": "normal", "group": "A" },
+            "lineWidth": 1,
+            "fillOpacity": 20
+          }
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "showLegend": true } },
       "targets": [
         {
           "expr": "sum(rate(cookbook_flashsale_checkout_attempts_total[30s])) by (adapter, outcome)",
-          "legendFormat": "{{adapter}} / {{outcome}}",
+          "legendFormat": "{{adapter}} · {{outcome}}",
           "refId": "A"
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      ]
     },
     {
       "type": "timeseries",
       "title": "p50 latency per adapter",
-      "id": 4,
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "id": 6,
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 13 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
       "targets": [
         {
           "expr": "histogram_quantile(0.5, sum(rate(cookbook_flashsale_checkout_latency_seconds_bucket[30s])) by (le, adapter))",
           "legendFormat": "{{adapter}}",
           "refId": "A"
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      ]
     },
     {
       "type": "timeseries",
       "title": "p95 latency per adapter",
-      "id": 5,
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "id": 7,
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 13 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum(rate(cookbook_flashsale_checkout_latency_seconds_bucket[30s])) by (le, adapter))",
           "legendFormat": "{{adapter}}",
           "refId": "A"
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      ]
     },
     {
       "type": "timeseries",
       "title": "p99 latency per adapter",
-      "id": 6,
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "id": 8,
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 13 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum(rate(cookbook_flashsale_checkout_latency_seconds_bucket[30s])) by (le, adapter))",
           "legendFormat": "{{adapter}}",
           "refId": "A"
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      ]
     },
     {
       "type": "timeseries",
-      "title": "k6 client RPS",
-      "id": 7,
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "title": "k6 client RPS (load test)",
+      "id": 9,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
       "targets": [
         {
           "expr": "sum(rate(k6_http_reqs_total[30s]))",
-          "refId": "A",
-          "legendFormat": "k6 requests"
+          "legendFormat": "k6 requests",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(k6_http_req_duration_seconds_bucket[30s])) by (le))",
+          "legendFormat": "k6 p95 latency",
+          "refId": "B"
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "reqps" } }
+      ]
     },
     {
-      "type": "logs",
-      "title": "Logs (service=flashsale)",
-      "id": 8,
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "datasource": { "type": "loki", "uid": "loki" },
+      "type": "traces",
+      "title": "Recent checkouts (traces)",
+      "id": 10,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
       "targets": [
         {
-          "expr": "{service=\"flashsale\"}",
-          "refId": "A"
+          "query": "{resource.service.name=\"flashsale\"}",
+          "queryType": "traceql",
+          "refId": "A",
+          "tableType": "traces",
+          "limit": 20
         }
-      ],
-      "options": { "showLabels": false, "showTime": true, "wrapLogMessage": true }
+      ]
     }
   ]
 }

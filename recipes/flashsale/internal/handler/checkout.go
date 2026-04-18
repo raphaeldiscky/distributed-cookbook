@@ -1,4 +1,8 @@
 // Package handler implements the HTTP handlers for the flashsale recipe.
+//
+// Handlers are deliberately thin: bind DTO → call service → render DTO.
+// Orchestration, metrics, and oversell tracking live in `internal/service`;
+// atomic persistence lives in `internal/repository`.
 package handler
 
 import (
@@ -6,178 +10,109 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"sync"
-	"time"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/domain"
-	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/metrics"
-	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/stock"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/dto"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/repository"
+	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/service"
 )
 
-// Checkout wires the decrement adapter, metrics, and logger into HTTP handlers.
+// Checkout wires the application service and logger into HTTP endpoints.
 type Checkout struct {
-	dec     stock.Decrementer
-	metrics *Metrics
-	log     *slog.Logger
-
-	// Oversell detection: /seed records the initial stock per product; every
-	// successful /checkout increments orderCount. If orderCount exceeds
-	// initialStock, that checkout is an oversell. This captures lost-update
-	// races that the naive adapter produces, which don't necessarily drive
-	// stock_remaining below zero (the DB value is whatever the last writer
-	// happened to compute).
-	mu           sync.Mutex
-	initialStock map[int64]int
-	orderCount   map[int64]int
+	svc *service.Checkout
+	log *slog.Logger
 }
 
-// Metrics is a local alias so callers don't import the metrics pkg for type hints.
-type Metrics = metrics.Metrics
-
-// NewCheckout constructs a Checkout handler bound to one stock adapter.
-func NewCheckout(dec stock.Decrementer, m *metrics.Metrics, log *slog.Logger) *Checkout {
-	return &Checkout{
-		dec:          dec,
-		metrics:      m,
-		log:          log,
-		initialStock: make(map[int64]int),
-		orderCount:   make(map[int64]int),
-	}
+// NewCheckout constructs a Checkout handler bound to the given service.
+func NewCheckout(svc *service.Checkout, log *slog.Logger) *Checkout {
+	return &Checkout{svc: svc, log: log}
 }
 
-// Register attaches the checkout endpoints to e.
-func (h *Checkout) Register(e *echo.Echo) {
-	e.POST("/checkout", h.Post)
-	e.POST("/seed", h.Seed)
-	e.GET("/stock/:id", h.Stock)
-}
-
-type checkoutReq struct {
-	ProductID int64 `json:"product_id"`
-	Qty       int   `json:"qty"`
-}
-
-type checkoutResp struct {
-	OrderID        int64 `json:"order_id"`
-	StockRemaining int   `json:"stock_remaining"`
-}
-
-type errResp struct {
-	Error string `json:"error"`
-}
-
-// Post handles POST /checkout — attempts to decrement stock and record an order.
+// Post handles POST /checkout and POST /checkout/:adapter — decrements stock
+// and records an order, routed through the chosen Inventory implementation.
 func (h *Checkout) Post(c echo.Context) error {
-	var req checkoutReq
+	var req dto.CheckoutReq
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errResp{Error: "invalid json"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "invalid json"})
 	}
 
 	if req.ProductID <= 0 || req.Qty <= 0 {
-		return c.JSON(http.StatusBadRequest, errResp{Error: "product_id and qty must be positive"})
+		return c.JSON(
+			http.StatusBadRequest,
+			dto.ErrResp{Error: "product_id and qty must be positive"},
+		)
 	}
 
-	adapter := string(h.dec.Name())
-	start := time.Now()
+	kind := repository.Kind(c.Param("adapter"))
 
-	res, err := h.dec.Decrement(c.Request().Context(), req.ProductID, req.Qty)
-
-	h.metrics.CheckoutLatency.WithLabelValues(adapter).Observe(time.Since(start).Seconds())
-
+	res, err := h.svc.Checkout(c.Request().Context(), kind, req.ProductID, req.Qty)
 	switch {
 	case err == nil:
-		h.metrics.CheckoutAttempts.WithLabelValues(adapter, "ok").Inc()
-		h.metrics.StockRemaining.WithLabelValues(strconv.FormatInt(req.ProductID, 10)).
-			Set(float64(res.StockRemaining))
-
-		// Oversell check: successful checkouts beyond the seeded stock are oversells.
-		h.mu.Lock()
-
-		h.orderCount[req.ProductID] += req.Qty
-		if init, ok := h.initialStock[req.ProductID]; ok && h.orderCount[req.ProductID] > init {
-			h.metrics.OversellTotal.Inc()
-		}
-
-		h.mu.Unlock()
-
-		return c.JSON(http.StatusOK, checkoutResp{
+		return c.JSON(http.StatusOK, dto.CheckoutResp{
 			OrderID:        res.OrderID,
 			StockRemaining: res.StockRemaining,
+			Adapter:        string(res.Kind),
 		})
 	case errors.Is(err, domain.ErrOutOfStock):
-		h.metrics.CheckoutAttempts.WithLabelValues(adapter, "out_of_stock").Inc()
-
-		return c.JSON(http.StatusConflict, errResp{Error: "out_of_stock"})
+		return c.JSON(http.StatusConflict, dto.ErrResp{Error: "out_of_stock"})
 	case errors.Is(err, domain.ErrProductNotFound):
-		h.metrics.CheckoutAttempts.WithLabelValues(adapter, "not_found").Inc()
-
-		return c.JSON(http.StatusNotFound, errResp{Error: "product_not_found"})
+		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: "product_not_found"})
 	default:
-		h.metrics.CheckoutAttempts.WithLabelValues(adapter, "error").Inc()
-		h.log.ErrorContext(
-			c.Request().Context(),
-			"checkout failed",
-			slog.String("err", err.Error()),
-		)
-
-		return c.JSON(http.StatusInternalServerError, errResp{Error: "internal"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: err.Error()})
 	}
 }
 
-type seedReq struct {
-	ProductID int64  `json:"product_id"`
-	Name      string `json:"name"`
-	Stock     int    `json:"stock"`
-}
-
-// Seed handles POST /seed — resets stock for a product and clears prior orders.
+// Seed handles POST /seed — resets stock for a product across every
+// Inventory implementation so any `/checkout/:adapter` path works
+// afterwards.
 func (h *Checkout) Seed(c echo.Context) error {
-	var req seedReq
+	var req dto.SeedReq
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errResp{Error: "invalid json"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "invalid json"})
 	}
 
 	if req.ProductID <= 0 || req.Stock < 0 {
-		return c.JSON(http.StatusBadRequest, errResp{Error: "product_id > 0, stock >= 0"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "product_id > 0, stock >= 0"})
 	}
 
 	if req.Name == "" {
 		req.Name = "flashsale-item-" + strconv.FormatInt(req.ProductID, 10)
 	}
 
-	if err := h.dec.Seed(c.Request().Context(), req.ProductID, req.Name, req.Stock); err != nil {
-		h.log.ErrorContext(c.Request().Context(), "seed failed", slog.String("err", err.Error()))
-
-		return c.JSON(http.StatusInternalServerError, errResp{Error: "internal"})
+	seeded, err := h.svc.Seed(c.Request().Context(), req.ProductID, req.Name, req.Stock)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, dto.ErrResp{Error: "internal"})
 	}
 
-	h.mu.Lock()
-	h.initialStock[req.ProductID] = req.Stock
-	h.orderCount[req.ProductID] = 0
-	h.mu.Unlock()
-
-	h.metrics.StockRemaining.WithLabelValues(strconv.FormatInt(req.ProductID, 10)).
-		Set(float64(req.Stock))
-
-	return c.JSON(http.StatusOK, map[string]any{"product_id": req.ProductID, "stock": req.Stock})
+	return c.JSON(http.StatusOK, dto.SeedResp{
+		ProductID: req.ProductID,
+		Stock:     req.Stock,
+		Seeded:    seeded,
+	})
 }
 
-// Stock handles GET /stock/:id — returns current stock from the adapter's source of truth.
+// Stock handles GET /stock/:id and GET /stock/:adapter/:id — returns current
+// stock from the chosen Inventory's source of truth.
 func (h *Checkout) Stock(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
-		return c.JSON(http.StatusBadRequest, errResp{Error: "invalid id"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "invalid id"})
 	}
 
-	s, err := h.dec.Stock(c.Request().Context(), id)
+	kind := repository.Kind(c.Param("adapter"))
+
+	v, resolvedKind, err := h.svc.Stock(c.Request().Context(), kind, id)
 	switch {
 	case err == nil:
-		return c.JSON(http.StatusOK, map[string]any{"stock": s})
+		return c.JSON(http.StatusOK, dto.StockResp{
+			Stock:   v,
+			Adapter: string(resolvedKind),
+		})
 	case errors.Is(err, domain.ErrProductNotFound):
-		return c.JSON(http.StatusNotFound, errResp{Error: "product_not_found"})
+		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: "product_not_found"})
 	default:
-		return c.JSON(http.StatusInternalServerError, errResp{Error: "internal"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: err.Error()})
 	}
 }
