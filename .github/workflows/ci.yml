@@ -1,0 +1,71 @@
+name: CI
+
+on: [push]
+
+env:
+  GO_VERSION: "1.25.1"
+  NODE_VERSION: "20"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Dependencies
+        run: task install_tools
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Format Check
+        run: |
+          task format
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Code is not formatted properly. Please run 'task format'"
+            git diff
+            exit 1
+          fi
+
+      - name: Lint
+        run: task lint
+
+      - name: Dead Code Check
+        run: task deadcode
+
+      - name: Security Check
+        run: task security
+
+      - name: Test
+        run: task test
+
+      - name: Build Check
+        run: go build ./...

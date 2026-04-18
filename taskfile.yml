@@ -1,0 +1,132 @@
+version: "3"
+
+vars:
+  DC_DIR: deployments/docker-compose
+  DEFAULT_DB_DSN: "postgres://cookbook:cookbook@localhost:5433/cookbook_db?sslmode=disable"
+
+env:
+  POSTGRES_DSN: '{{.POSTGRES_DSN | default .DEFAULT_DB_DSN}}'
+
+tasks:
+  # ────── existing tooling ─────────────────────────────────────────────────
+  install_tools:
+    desc: Install all dependencies for the project
+    cmds:
+      - chmod +x ./scripts/install-tools.sh
+      - ./scripts/install-tools.sh
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./... -v
+
+  format:
+    desc: Run formatters
+    cmds:
+      - gofumpt -w .
+      - goimports -w .
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run ./... --fix
+    deps: [format]
+
+  deadcode:
+    desc: Check for dead code
+    cmds:
+      - deadcode --test ./...
+
+  security:
+    desc: Run security vulnerability scan
+    cmds:
+      - govulncheck ./...
+
+  # ────── infrastructure (granular, reusable across recipes) ───────────────
+  start_network:
+    desc: Create shared external Docker bridge network
+    cmds:
+      - docker network inspect distributed-cookbook >/dev/null 2>&1 || docker network create distributed-cookbook
+    status:
+      - docker network inspect distributed-cookbook >/dev/null 2>&1
+
+  start_postgres:
+    desc: Start Postgres container
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/postgres.yaml up -d
+
+  start_redis:
+    desc: Start Redis container
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/redis.yaml up -d
+
+  start_kafka:
+    desc: Start Kafka container (empty stub until recipe 2)
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/kafka.yaml up -d
+
+  sync_dashboards:
+    desc: Sync every recipe's Grafana dashboard JSON into the provisioned dir
+    cmds:
+      - bash ./scripts/sync-dashboards.sh
+
+  start_monitoring:
+    desc: Start LGTM + Alloy + OTel Collector stack
+    deps: [start_network, sync_dashboards]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/monitoring.yaml up -d
+
+  # ────── recipe-aware composites (use RECIPE= variable) ────────────────────
+  start_stack:
+    desc: "Bring up the full stack for a recipe. Usage: task start_stack RECIPE=flashsale"
+    deps: [start_network, sync_dashboards]
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/recipes/{{.RECIPE}}.stack.yaml up -d
+
+  stop_stack:
+    desc: "Stop a recipe's stack. Usage: task stop_stack RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/recipes/{{.RECIPE}}.stack.yaml down
+
+  stop_all:
+    desc: Stop every known infra container (safe to re-run)
+    cmds:
+      - docker compose -f {{.DC_DIR}}/monitoring.yaml down || true
+      - docker compose -f {{.DC_DIR}}/postgres.yaml down || true
+      - docker compose -f {{.DC_DIR}}/redis.yaml down || true
+      - docker compose -f {{.DC_DIR}}/kafka.yaml down || true
+
+  migrate_up:
+    desc: "Apply migrations for a recipe. Usage: task migrate_up RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - migrate -path recipes/{{.RECIPE}}/migrations -database "$POSTGRES_DSN" up
+
+  migrate_down:
+    desc: "Rollback one migration for a recipe. Usage: task migrate_down RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - migrate -path recipes/{{.RECIPE}}/migrations -database "$POSTGRES_DSN" down 1
+
+  run:
+    desc: "Run a recipe's server. Usage: task run RECIPE=flashsale RECIPE_FLASHSALE_ADAPTER=pg_cond"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - go run ./recipes/{{.RECIPE}}/cmd/server
+
+  load_test:
+    desc: "Run k6 load test for a recipe. Usage: task load_test RECIPE=flashsale CONCURRENT_USERS=5000 ..."
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - k6 run recipes/{{.RECIPE}}/loadtest/checkout.js

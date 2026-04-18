@@ -1,0 +1,37 @@
+// Alloy scrapes Docker container stdout/stderr and forwards to Loki.
+// This gives each recipe app free log aggregation with container labels.
+
+discovery.docker "cookbook" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "name"
+    values = ["cookbook-.*"]
+  }
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.cookbook.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/?cookbook-(.*)"
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "cookbook" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.docker_logs.output
+  forward_to    = [loki.write.default.receiver]
+  relabel_rules = discovery.relabel.docker_logs.rules
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

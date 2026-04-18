@@ -1,0 +1,9 @@
+# Flashsale recipe stack — composes the infra atoms this recipe needs.
+# Run: `task start_stack RECIPE=flashsale`
+#
+# The shared bridge network is created by `task start_network` (a dep of
+# `start_stack`) via plain `docker network create`, so it is NOT included here.
+include:
+  - path: ../postgres.yaml
+  - path: ../redis.yaml
+  - path: ../monitoring.yaml

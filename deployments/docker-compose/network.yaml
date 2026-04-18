@@ -1,0 +1,5 @@
+networks:
+  distributed-cookbook:
+    name: distributed-cookbook
+    driver: bridge
+    external: true

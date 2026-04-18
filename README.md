@@ -9,7 +9,7 @@ Each recipe is a small runnable program with a Grafana dashboard and a k6 load t
 
 System-design blog posts are dense. Production codebases are tangled. This
 repo sits in the middle: **one concept per recipe**, enough code to run and
-watch, enough observability to see *why* the concept matters.
+watch, enough observability to see _why_ the concept matters.
 
 Recipe 1, `flashsale`, shows the classic overselling race condition: 200
 units in stock, thousands of buyers, and three ways to avoid recording
@@ -18,8 +18,8 @@ units in stock, thousands of buyers, and three ways to avoid recording
 
 ## Recipes
 
-| Recipe | Concept |
-|---|---|
+| Recipe                                       | Concept                                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | [`flashsale`](./recipes/flashsale/RECIPE.md) | Atomic stock decrement under high concurrency. Naive read-check-write vs. Postgres conditional UPDATE vs. Redis Lua. |
 
 Full catalogue of planned recipes: **[docs/ROADMAP.md](./docs/ROADMAP.md)**.
@@ -93,4 +93,5 @@ See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full tour.
 ## License
 
 MIT — see `LICENSE`.
+
 # distributed-cookbook

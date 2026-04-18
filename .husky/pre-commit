@@ -1,0 +1,1 @@
+task format && task lint && git add -A .
