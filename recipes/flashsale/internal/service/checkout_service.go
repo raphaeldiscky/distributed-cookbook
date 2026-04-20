@@ -17,6 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/domain"
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/metrics"
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/repository"
@@ -29,6 +33,7 @@ type Checkout struct {
 	inventories map[repository.Kind]repository.Inventory
 	defaultKind repository.Kind
 	metrics     *metrics.Metrics
+	tracer      trace.Tracer
 	log         *slog.Logger
 
 	// Oversell detection: /seed records initial stock per (kind, product).
@@ -53,18 +58,24 @@ type Result struct {
 }
 
 // NewCheckout constructs a Checkout service wired to every Inventory
-// implementation and the metrics registry. defaultKind is used when a
-// caller omits the kind (e.g. POST /checkout without :adapter).
+// implementation, the metrics registry, and an OTel tracer. defaultKind
+// is used when a caller omits the kind (e.g. POST /checkout without
+// :adapter). The tracer is typically `tel.Tracer()` from pkg/telemetry —
+// it creates a `flashsale.checkout` span per call that pairs nicely with
+// the outer `otelecho` HTTP span and the inner `otelpgx`/`otelredis`
+// spans in Grafana Tempo.
 func NewCheckout(
 	inventories map[repository.Kind]repository.Inventory,
 	defaultKind repository.Kind,
 	m *metrics.Metrics,
+	tracer trace.Tracer,
 	log *slog.Logger,
 ) *Checkout {
 	return &Checkout{
 		inventories:  inventories,
 		defaultKind:  defaultKind,
 		metrics:      m,
+		tracer:       tracer,
 		log:          log,
 		initialStock: make(map[trackKey]int),
 		orderCount:   make(map[trackKey]int),
@@ -103,6 +114,19 @@ func (s *Checkout) Checkout(
 	}
 
 	kindStr := string(resolvedKind)
+
+	// Manual span: between the outer otelecho HTTP span and the inner
+	// otelpgx / otelredis spans. Attributes make a checkout's adapter,
+	// product, and qty visible at a glance in Tempo.
+	ctx, span := s.tracer.Start(ctx, "flashsale.checkout",
+		trace.WithAttributes(
+			attribute.String("adapter", kindStr),
+			attribute.Int64("product_id", productID),
+			attribute.Int("qty", qty),
+		),
+	)
+	defer span.End()
+
 	start := time.Now()
 
 	res, decErr := inv.Decrement(ctx, productID, qty)
@@ -118,6 +142,12 @@ func (s *Checkout) Checkout(
 
 		s.recordOversell(resolvedKind, productID, qty)
 
+		span.SetAttributes(
+			attribute.String("outcome", string(metrics.OutcomeOK)),
+			attribute.Int64("order_id", res.OrderID),
+			attribute.Int("stock_remaining", res.StockRemaining),
+		)
+
 		return Result{
 			OrderID:        res.OrderID,
 			StockRemaining: res.StockRemaining,
@@ -126,11 +156,13 @@ func (s *Checkout) Checkout(
 
 	case errors.Is(decErr, domain.ErrOutOfStock):
 		s.metrics.CheckoutAttempts.WithLabelValues(kindStr, string(metrics.OutcomeOutOfStock)).Inc()
+		span.SetAttributes(attribute.String("outcome", string(metrics.OutcomeOutOfStock)))
 
 		return Result{}, decErr
 
 	case errors.Is(decErr, domain.ErrProductNotFound):
 		s.metrics.CheckoutAttempts.WithLabelValues(kindStr, string(metrics.OutcomeNotFound)).Inc()
+		span.SetAttributes(attribute.String("outcome", string(metrics.OutcomeNotFound)))
 
 		return Result{}, decErr
 
@@ -140,6 +172,9 @@ func (s *Checkout) Checkout(
 			slog.String("kind", kindStr),
 			slog.String("err", decErr.Error()),
 		)
+		// Mark the span as a real failure (not a business-logic 409/404).
+		span.SetStatus(codes.Error, decErr.Error())
+		span.SetAttributes(attribute.String("outcome", string(metrics.OutcomeError)))
 
 		return Result{}, decErr
 	}

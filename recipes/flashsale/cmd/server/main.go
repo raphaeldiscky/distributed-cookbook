@@ -108,7 +108,7 @@ func run() error {
 		}
 	}
 
-	svc := service.NewCheckout(inventories, cfg.DefaultKind, m, log)
+	svc := service.NewCheckout(inventories, cfg.DefaultKind, m, tel.Tracer(), log)
 	checkoutHandler := handler.NewCheckout(svc, log)
 
 	e := httpserver.New(serviceName, reg, log)
