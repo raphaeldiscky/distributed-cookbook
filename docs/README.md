@@ -1,0 +1,35 @@
+# Distributed Cookbook — Docs
+
+This directory holds the meta-docs for the cookbook itself. Per-recipe
+docs live next to the recipe as `recipes/<name>/RECIPE.md`.
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — how recipes are laid out,
+  how infrastructure is shared, and the design patterns each piece of
+  code implements (with line-number pointers).
+- **[CONVENTIONS.md](./CONVENTIONS.md)** — the hard rules: port
+  allocation registry, metric namespace, schema naming, env var prefix,
+  file naming. Contributors copy from here.
+- **[DECISIONS.md](./DECISIONS.md)** — lightweight ADR log explaining
+  deliberate non-choices (no Wire, no ORM, no Viper, …) with rationale.
+  Read this before proposing "why aren't we using X?" changes.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — concrete checklist for
+  adding a new recipe, including the `pkg/` vs recipe-local decision tree.
+- **[ROADMAP.md](./ROADMAP.md)** — catalogue of planned future recipes,
+  grouped by topic.
+
+## Current recipes
+
+| Recipe                                      | Status       | Concept                                       | Infra                 |
+| ------------------------------------------- | ------------ | --------------------------------------------- | --------------------- |
+| [flashsale](../recipes/flashsale/RECIPE.md) | ✅ available | atomic stock decrement under high concurrency | Postgres, Redis, LGTM |
+
+## Reading order for new contributors
+
+1. [ARCHITECTURE.md](./ARCHITECTURE.md) — what this repo is and why
+2. [DECISIONS.md](./DECISIONS.md) — why it isn't the other thing
+3. [CONVENTIONS.md](./CONVENTIONS.md) — the rules your PR must satisfy
+4. [CONTRIBUTING.md](./CONTRIBUTING.md) — the checklist
+
+## Top-level
+
+- Top-level [README](../README.md) — getting started

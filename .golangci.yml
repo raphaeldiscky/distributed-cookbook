@@ -1,0 +1,129 @@
+version: "2"
+
+linters:
+  enable:
+    - asciicheck
+    - bodyclose
+    - dogsled
+    - dupl
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gomodguard
+    - govet
+    - ineffassign
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nlreturn
+    - noctx
+    - nolintlint
+    - predeclared
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - tparallel
+    - thelper
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+    - wsl_v5
+    - paralleltest
+    - errcheck
+    - gosec
+    - cyclop
+    - revive
+  disable:
+    - godox
+
+  settings:
+    dupl:
+      threshold: 120
+    errorlint:
+      errorf: true
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    exhaustive:
+      default-signifies-exhaustive: false
+    funlen:
+      lines: 150
+      statements: 50
+    gocognit:
+      min-complexity: 40
+    cyclop:
+      max-complexity: 20
+    gocyclo:
+      min-complexity: 15
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - dupImport
+        - unnecessaryBlock
+    misspell:
+      locale: US
+    nestif:
+      min-complexity: 4
+    revive:
+      enable-all-rules: true
+      rules:
+        - name: cyclomatic
+          disabled: true
+        - name: function-length
+          disabled: true
+        - name: cognitive-complexity
+          disabled: true
+        - name: line-length-limit
+          disabled: true
+        - name: package-comments
+          disabled: true
+        - name: unused-parameter
+          disabled: true
+        - name: unused-receiver
+          disabled: true
+        - name: add-constant
+          disabled: true
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/raphaeldiscky/go-template)
+        - blank
+        - dot
+        - alias
+        - localmodule
+      no-inline-comments: true
+      no-prefix-comments: true
+      custom-order: true
+      no-lex-order: true

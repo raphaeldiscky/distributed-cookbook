@@ -1,0 +1,141 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.11.2
+    container_name: cookbook-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./monitoring/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=72h"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    # Linux-compatible alias so Prometheus can scrape the Go app running on
+    # the host. On Docker Desktop (macOS/Windows) this is automatic.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - distributed-cookbook
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:13.0.1
+    container_name: cookbook-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - distributed-cookbook
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  loki:
+    image: grafana/loki:3.7.1
+    container_name: cookbook-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/config/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    networks:
+      - distributed-cookbook
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tempo:
+    image: grafana/tempo:2.10.4
+    container_name: cookbook-tempo
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "3200:3200"  # tempo HTTP
+      - "4317:4317"  # OTLP gRPC (direct to tempo, optional)
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - tempo_data:/var/tempo
+      - ./monitoring/config/tempo-config.yaml:/etc/tempo.yaml:ro
+    networks:
+      - distributed-cookbook
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.150.1
+    container_name: cookbook-otel-collector
+    restart: unless-stopped
+    ports:
+      - "4318:4318"   # OTLP HTTP receiver (apps send here)
+      - "8889:8889"   # Prometheus exporter (scraped by Prometheus)
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./monitoring/config/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    networks:
+      - distributed-cookbook
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  alloy:
+    image: grafana/alloy:v1.15.1
+    container_name: cookbook-alloy
+    restart: unless-stopped
+    ports:
+      - "12345:12345"
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/config/alloy-config.river:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    networks:
+      - distributed-cookbook
+    depends_on:
+      - loki
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  tempo_data:
+  alloy_data:
+
+networks:
+  distributed-cookbook:
+    external: true

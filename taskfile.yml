@@ -1,0 +1,168 @@
+version: "3"
+
+vars:
+  DC_DIR: deployments/docker-compose
+  DEFAULT_DB_DSN: "postgres://cookbook:cookbook@localhost:5433/cookbook_db?sslmode=disable"
+
+env:
+  POSTGRES_DSN: '{{.POSTGRES_DSN | default .DEFAULT_DB_DSN}}'
+
+tasks:
+  # ────── existing tooling ─────────────────────────────────────────────────
+  install_tools:
+    desc: Install all dependencies for the project
+    cmds:
+      - chmod +x ./scripts/install-tools.sh
+      - ./scripts/install-tools.sh
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./... -v
+
+  format:
+    desc: Run formatters
+    cmds:
+      - gofumpt -w .
+      - goimports -w .
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run ./... --fix
+    deps: [format]
+
+  deadcode:
+    desc: Check for dead code
+    cmds:
+      - deadcode --test ./...
+
+  security:
+    desc: Run security vulnerability scan
+    cmds:
+      - govulncheck ./...
+
+  # ────── infrastructure (granular, reusable across recipes) ───────────────
+  start_network:
+    desc: Create shared external Docker bridge network
+    cmds:
+      - docker network inspect distributed-cookbook >/dev/null 2>&1 || docker network create distributed-cookbook
+    status:
+      - docker network inspect distributed-cookbook >/dev/null 2>&1
+
+  start_postgres:
+    desc: Start Postgres container
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/postgres.yaml up -d
+
+  start_redis:
+    desc: Start Redis container
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/redis.yaml up -d
+
+  start_kafka:
+    desc: Start Kafka container (empty stub until recipe 2)
+    deps: [start_network]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/kafka.yaml up -d
+
+  sync_dashboards:
+    desc: Sync every recipe's Grafana dashboard JSON into the provisioned dir
+    cmds:
+      - bash ./scripts/sync-dashboards.sh
+
+  start_monitoring:
+    desc: Start LGTM + Alloy + OTel Collector stack
+    deps: [start_network, sync_dashboards]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/monitoring.yaml up -d
+
+  # ────── recipe-aware composites (use RECIPE= variable) ────────────────────
+  start_stack:
+    desc: "Bring up the full stack for a recipe. Usage: task start_stack RECIPE=flashsale"
+    deps: [start_network, sync_dashboards]
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/recipes/{{.RECIPE}}.stack.yaml up -d
+
+  stop_stack:
+    desc: "Stop a recipe's stack. Usage: task stop_stack RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - docker compose -f {{.DC_DIR}}/recipes/{{.RECIPE}}.stack.yaml down
+
+  stop_all:
+    desc: Stop every known infra container (safe to re-run)
+    cmds:
+      - docker compose -f {{.DC_DIR}}/monitoring.yaml down || true
+      - docker compose -f {{.DC_DIR}}/postgres.yaml down || true
+      - docker compose -f {{.DC_DIR}}/redis.yaml down || true
+      - docker compose -f {{.DC_DIR}}/kafka.yaml down || true
+
+  migrate_up:
+    desc: "Apply migrations for a recipe. Usage: task migrate_up RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - migrate -path recipes/{{.RECIPE}}/migrations -database "$POSTGRES_DSN" up
+
+  migrate_down:
+    desc: "Rollback one migration for a recipe. Usage: task migrate_down RECIPE=flashsale"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - migrate -path recipes/{{.RECIPE}}/migrations -database "$POSTGRES_DSN" down 1
+
+  run:
+    desc: "Run a recipe's server with hot reload (air). Usage: task run RECIPE=flashsale RECIPE_FLASHSALE_ADAPTER=pg_cond"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      # Air watches recipes/<name>/ and pkg/ for .go changes, rebuilds, and
+      # restarts the server. It sends SIGINT on restart so the server's
+      # existing graceful-shutdown path drains in-flight requests before exit.
+      # `kill_delay=3s` keeps dev iteration snappy (shorter than the server's
+      # own 10s shutdown timeout — slow requests get dropped during dev,
+      # which is the right tradeoff).
+      - |
+        air \
+          --build.cmd "go build -o ./tmp/{{.RECIPE}}-server ./recipes/{{.RECIPE}}/cmd/server" \
+          --build.bin "./tmp/{{.RECIPE}}-server" \
+          --build.include_dir "recipes/{{.RECIPE}},pkg" \
+          --build.include_ext "go" \
+          --build.exclude_dir "tmp,vendor,node_modules,deployments,docs,.git,.husky" \
+          --build.kill_delay 3s \
+          --build.delay 500 \
+          --build.stop_on_error true \
+          --misc.clean_on_exit true
+
+  stop_server:
+    desc: "Kill the process listening on PORT (default 8081 = flashsale). Usage: task stop_server [PORT=8082]"
+    vars:
+      PORT: '{{default "8081" .PORT}}'
+    cmds:
+      # Task's mvdan/sh doesn't implement `kill` as a builtin, so use
+      # /bin/kill explicitly (external binary, always available on Linux/macOS).
+      - |
+        PIDS=$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)
+        if [ -z "$PIDS" ]; then
+          echo "nothing listening on :{{.PORT}}"
+        else
+          echo "killing on :{{.PORT}} → $PIDS"
+          /bin/kill $PIDS
+        fi
+
+  load_test:
+    desc: "Run k6 load test for a recipe. Usage: task load_test RECIPE=flashsale CONCURRENT_USERS=5000 ..."
+    requires:
+      vars: [RECIPE]
+    env:
+      # k6 remote_writes to this URL; Prometheus has --web.enable-remote-write-receiver.
+      K6_PROMETHEUS_RW_SERVER_URL: '{{default "http://localhost:9090/api/v1/write" .K6_PROMETHEUS_RW_SERVER_URL}}'
+      K6_PROMETHEUS_RW_TREND_STATS: "p(50),p(95),p(99),min,max"
+    cmds:
+      - k6 run --out experimental-prometheus-rw recipes/{{.RECIPE}}/loadtest/checkout.js
