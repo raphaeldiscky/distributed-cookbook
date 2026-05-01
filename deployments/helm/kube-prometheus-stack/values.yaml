@@ -1,0 +1,57 @@
+# kube-prometheus-stack helm values, sized for a kind cluster on a dev laptop.
+#
+# Components installed: Prometheus Operator (CRDs), Prometheus, Grafana,
+# node-exporter, kube-state-metrics. Loki/Tempo are NOT included — this
+# recipe is a perf comparison; logs and traces are out of scope. Future
+# K8s recipes that need them can extend.
+#
+# Grafana sidecar auto-loads dashboards from any ConfigMap with the
+# label `grafana_dashboard=1` cluster-wide.
+
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    podMonitorSelector: {}
+    retention: 6h
+    enableRemoteWriteReceiver: true   # k6 remote_writes load-test metrics here
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+grafana:
+  adminUser: admin
+  adminPassword: admin
+  defaultDashboardsEnabled: true
+  service:
+    type: ClusterIP
+    port: 80
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+alertmanager:
+  enabled: false
+
+# Disable cluster-internal scrapes that don't apply on kind.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false   # we set kubeProxyMode: none — Cilium replaces it.

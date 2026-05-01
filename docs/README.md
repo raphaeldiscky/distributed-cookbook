@@ -19,9 +19,19 @@ docs live next to the recipe as `recipes/<name>/RECIPE.md`.
 
 ## Current recipes
 
-| Recipe                                      | Status       | Concept                                       | Infra                 |
-| ------------------------------------------- | ------------ | --------------------------------------------- | --------------------- |
-| [flashsale](../recipes/flashsale/RECIPE.md) | ✅ available | atomic stock decrement under high concurrency | Postgres, Redis, LGTM |
+| Recipe                                                | Status       | Concept                                                       | Infra                                       |
+| ----------------------------------------------------- | ------------ | ------------------------------------------------------------- | ------------------------------------------- |
+| [flashsale](../recipes/flashsale/RECIPE.md)           | ✅ available | atomic stock decrement under high concurrency                 | Postgres, Redis, LGTM (compose)             |
+| [envoy-gateway](../recipes/envoy-gateway/RECIPE.md)   | ✅ available | K8s L7 ingress via Envoy Gateway (reference Gateway API impl) | kind (kindnet), Envoy Gateway, kube-prom-stack |
+| [cilium-gateway](../recipes/cilium-gateway/RECIPE.md) | ✅ available | K8s L7 ingress via Cilium (CNI + Gateway API in one product)  | kind, Cilium, kube-prom-stack                |
+
+`envoy-gateway` and `cilium-gateway` share the universal
+`user-service` and `catalog-service` workloads from
+[../services/README.md](../services/README.md) — they're the first two
+recipes built on the services-reuse pattern. Each recipe runs its own
+kind cluster (production-realistic single-gateway topology); compare
+the two by running each in turn and overlaying their Grafana
+dashboards.
 
 ## Reading order for new contributors
 

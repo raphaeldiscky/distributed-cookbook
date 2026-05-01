@@ -1,0 +1,14 @@
+# Recipe kustomization — composes the universal services with the
+# cilium-gateway adapter. One Gateway, one HTTPRoute, single
+# production-realistic topology.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cilium-gateway
+
+resources:
+  - namespace.yaml
+  - ../../services/user-service
+  - ../../services/catalog-service
+  - gateway.yaml
+  - httproute.yaml

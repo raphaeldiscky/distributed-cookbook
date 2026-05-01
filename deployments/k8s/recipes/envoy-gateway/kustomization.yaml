@@ -1,0 +1,20 @@
+# Recipe kustomization — composes the universal services with the
+# envoy-gateway adapter. One Gateway, one HTTPRoute. Production-realistic
+# topology: one gateway per cluster.
+#
+# `namespace: envoy-gateway` applies to every resource pulled in below,
+# including the bases under deployments/k8s/services/* (which omit
+# namespace deliberately so recipes can place them).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: envoy-gateway
+
+resources:
+  - namespace.yaml
+  # Universal services from the shared catalogue:
+  - ../../services/user-service
+  - ../../services/catalog-service
+  # The gateway + route:
+  - gateway.yaml
+  - httproute.yaml

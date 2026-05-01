@@ -1,0 +1,12 @@
+# Reusable base for the catalog-service workload. Recipes that need a
+# products API include this from their own kustomization:
+#
+#   resources:
+#     - ../../services/catalog-service
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - servicemonitor.yaml

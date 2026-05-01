@@ -1,0 +1,7 @@
+# Helm release manifest for Cilium (cluster CNI + Gateway API impl).
+# Read by Tilt's read_yaml() and by scripts/kind-up.sh's yq invocation.
+chart: cilium/cilium
+repo: https://helm.cilium.io
+version: 1.19.3
+namespace: kube-system
+createNamespace: false

@@ -122,39 +122,14 @@ tasks:
     requires:
       vars: [RECIPE]
     cmds:
-      # Air watches recipes/<name>/ and pkg/ for .go changes, rebuilds, and
-      # restarts the server. It sends SIGINT on restart so the server's
-      # existing graceful-shutdown path drains in-flight requests before exit.
-      # `kill_delay=3s` keeps dev iteration snappy (shorter than the server's
-      # own 10s shutdown timeout — slow requests get dropped during dev,
-      # which is the right tradeoff).
-      - |
-        air \
-          --build.cmd "go build -o ./tmp/{{.RECIPE}}-server ./recipes/{{.RECIPE}}/cmd/server" \
-          --build.bin "./tmp/{{.RECIPE}}-server" \
-          --build.include_dir "recipes/{{.RECIPE}},pkg" \
-          --build.include_ext "go" \
-          --build.exclude_dir "tmp,vendor,node_modules,deployments,docs,.git,.husky" \
-          --build.kill_delay 3s \
-          --build.delay 500 \
-          --build.stop_on_error true \
-          --misc.clean_on_exit true
+      - bash ./scripts/run-recipe.sh {{.RECIPE}}
 
   stop_server:
     desc: "Kill the process listening on PORT (default 8081 = flashsale). Usage: task stop_server [PORT=8082]"
     vars:
       PORT: '{{default "8081" .PORT}}'
     cmds:
-      # Task's mvdan/sh doesn't implement `kill` as a builtin, so use
-      # /bin/kill explicitly (external binary, always available on Linux/macOS).
-      - |
-        PIDS=$(lsof -ti tcp:{{.PORT}} 2>/dev/null || true)
-        if [ -z "$PIDS" ]; then
-          echo "nothing listening on :{{.PORT}}"
-        else
-          echo "killing on :{{.PORT}} → $PIDS"
-          /bin/kill $PIDS
-        fi
+      - bash ./scripts/stop-server.sh {{.PORT}}
 
   load_test:
     desc: "Run k6 load test for a recipe. Usage: task load_test RECIPE=flashsale CONCURRENT_USERS=5000 ..."
@@ -166,3 +141,59 @@ tasks:
       K6_PROMETHEUS_RW_TREND_STATS: "p(50),p(95),p(99),min,max"
     cmds:
       - k6 run --out experimental-prometheus-rw recipes/{{.RECIPE}}/loadtest/checkout.js
+
+  # ────── kubernetes / Tilt (Mode B recipes; see docs/ARCHITECTURE.md) ─────
+  #
+  # Each K8s-mode recipe is self-contained: Tiltfile, kind-cluster.yaml,
+  # and scripts/kind-up.sh all live under recipes/<name>/. Pass RECIPE=
+  # to pick which one.
+
+  kind_up:
+    desc: "Create the kind cluster for a K8s-mode recipe. Usage: task kind_up RECIPE=envoy-gateway"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - bash ./recipes/{{.RECIPE}}/scripts/kind-up.sh
+
+  kind_down:
+    desc: "Delete the kind cluster for a K8s-mode recipe. Usage: task kind_down RECIPE=envoy-gateway"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - kind delete cluster --name cookbook-{{.RECIPE}}
+
+  tilt_up:
+    desc: "Bring up a K8s-mode recipe via Tilt. Usage: task tilt_up RECIPE=envoy-gateway"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - tilt up -f recipes/{{.RECIPE}}/Tiltfile
+
+  tilt_down:
+    desc: "Tear down Tilt-managed resources for a K8s-mode recipe. Usage: task tilt_down RECIPE=envoy-gateway"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - tilt down -f recipes/{{.RECIPE}}/Tiltfile
+
+  tilt_restart:
+    desc: "Restart Tilt for a K8s-mode recipe (picks up Tiltfile changes that don't hot-reload, e.g. port_forwards). Usage: task tilt_restart RECIPE=envoy-gateway"
+    requires:
+      vars: [RECIPE]
+    cmds:
+      - tilt down -f recipes/{{.RECIPE}}/Tiltfile
+      - tilt up   -f recipes/{{.RECIPE}}/Tiltfile
+
+  load_test_k8s:
+    desc: |
+      Run k6 against an in-cluster gateway. Usage:
+        BASE_URL=http://localhost:8082 task load_test_k8s RECIPE=envoy-gateway
+        BASE_URL=http://localhost:8083 task load_test_k8s RECIPE=cilium-gateway
+      Prometheus remote_write goes to the in-cluster Prometheus on host port 9091.
+    requires:
+      vars: [RECIPE]
+    env:
+      K6_PROMETHEUS_RW_SERVER_URL: '{{default "http://localhost:9091/api/v1/write" .K6_PROMETHEUS_RW_SERVER_URL}}'
+      K6_PROMETHEUS_RW_TREND_STATS: "p(50),p(95),p(99),min,max"
+    cmds:
+      - k6 run --out experimental-prometheus-rw recipes/{{.RECIPE}}/loadtest/ping.js

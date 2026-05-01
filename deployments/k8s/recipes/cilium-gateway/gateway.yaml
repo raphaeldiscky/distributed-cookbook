@@ -1,0 +1,22 @@
+# Cilium Gateway: bound to the `cilium` GatewayClass, registered by
+# Cilium's helm install (with gatewayAPI.enabled=true and
+# gatewayAPI.hostNetwork.enabled=true) in scripts/kind-up.sh.
+#
+# Listener port is 8080, not 80, because Host Network mode binds the
+# port directly on the kind node's network namespace and Cilium docs
+# require a non-privileged port (>1023) — privileged ports would need
+# extra envoy.securityContext.capabilities config we're skipping.
+# kind extraPortMappings forwards host:8083 → kind container:8080.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: cilium-gateway
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces:
+          from: Same

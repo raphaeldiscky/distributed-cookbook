@@ -28,7 +28,7 @@ How to contribute a recipe: **[docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md)**.
 
 ## Quick start
 
-Prerequisites: Docker, Go 1.25+, `task` (`brew install go-task/tap/go-task`).
+Prerequisites: Docker, Go 1.26+, `task` (`brew install go-task/tap/go-task`).
 
 ```bash
 # One-time
@@ -84,7 +84,7 @@ See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full tour.
 
 ## Technologies
 
-- **Go 1.25+** · Echo v4 · pgx/v5 · go-redis/v9 · slog · Prometheus client
+- **Go 1.26+** · Echo v4 · pgx/v5 · go-redis/v9 · slog · Prometheus client
 - **OpenTelemetry** (`otelecho`, `otelpgx`, `otelredis`)
 - **Postgres 18 · Redis 8 · Kafka (recipe 2+)**
 - **Grafana LGTM stack + Alloy**

@@ -246,6 +246,31 @@ this file is how architectural drift happens.
 
 ---
 
+## 15. Helm chart pins live in `deployments/helm/<chart>/release.yaml`, not in the Tiltfile
+
+- **Chose:** each helm-installed chart has its own directory under
+  `deployments/helm/`, holding `release.yaml` (chart, repo, version,
+  namespace, flags) and `values.yaml`. The Tiltfile reads `release.yaml`
+  via `read_yaml()` and a small `helm_release()` Starlark helper;
+  `scripts/kind-up.sh` reads it via `yq` for charts that must be
+  installed before Tilt starts (Cilium).
+- **Rejected:** hardcoding chart pins inline in the Tiltfile, OR
+  scattering them across Tiltfile + bash scripts as env-var defaults.
+- **Reason:** the Tiltfile is local-dev orchestration. A future prod
+  deployment (ArgoCD ApplicationSet, Helmfile, raw helm CI) needs the
+  same versions. Pins-in-Tiltfile force prod to duplicate them, and
+  duplication drifts. Co-locating `release.yaml` with `values.yaml`
+  next to each chart gives every consumer a single source of truth and
+  matches the cookbook's "atomic files" principle (§ 7) — adding a
+  chart is purely additive (one new directory with two files plus one
+  `helm_release(...)` line in the Tiltfile).
+- **Revisit trigger:** if we end up with 10+ charts and the
+  `release.yaml`/`values.yaml` split feels like overhead, consider a
+  Helmfile (single declarative file listing all releases). For now
+  three charts is well under that threshold.
+
+---
+
 ## When to revise a decision
 
 If a recipe genuinely needs something on this "rejected" list, update

@@ -34,7 +34,8 @@ const serviceName = "flashsale"
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "fatal:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "fatal:", err)
+
 		os.Exit(1)
 	}
 }

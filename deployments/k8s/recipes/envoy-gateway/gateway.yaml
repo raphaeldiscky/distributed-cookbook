@@ -1,0 +1,15 @@
+# Envoy Gateway: bound to the controller's default `eg` GatewayClass
+# (installed by the envoy-gateway helm chart).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: envoy-gateway
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same

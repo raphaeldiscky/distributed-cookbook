@@ -1,0 +1,174 @@
+# Tiltfile for the envoy-gateway recipe.
+#
+# One gateway per recipe (production-realistic). Run via:
+#   task kind_up   RECIPE=envoy-gateway
+#   task tilt_up   RECIPE=envoy-gateway
+#
+# Compares against the sibling cilium-gateway recipe via separate runs;
+# metric names align so dashboards overlay cleanly.
+#
+# Docs: https://docs.tilt.dev/
+
+update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=300)
+
+# Only this kind context is allowed; Tilt refuses to touch any other.
+allow_k8s_contexts(['kind-cookbook-envoy-gateway'])
+
+load('ext://helm_resource', 'helm_resource', 'helm_repo')
+
+# ─────────── helm release loader ────────────────────────────────────────────
+#
+# All chart pins (chart source, version, namespace, flags) live next to
+# their values in deployments/helm/<chart>/release.yaml. See
+# deployments/helm/README.md and the .claude/rules/pinned-versions.md rule.
+
+_registered_repos = {}
+
+def helm_release(name, **extra_kwargs):
+    """Install a helm chart from deployments/helm/<name>/{release,values}.yaml."""
+    rel = read_yaml('../../deployments/helm/{}/release.yaml'.format(name))
+
+    repo_url = rel.get('repo')
+    if repo_url and repo_url not in _registered_repos:
+        repo_name = rel['chart'].split('/')[0]
+        helm_repo(repo_name, repo_url, labels=['helm-repos'])
+        _registered_repos[repo_url] = True
+
+    flags = ['--version={}'.format(rel['version'])]
+    if rel.get('createNamespace'):
+        flags.append('--create-namespace')
+    flags.append('--values=../../deployments/helm/{}/values.yaml'.format(name))
+    if rel.get('skipCRDs'):
+        flags.append('--skip-crds')
+
+    helm_resource(
+        name,
+        rel['chart'],
+        namespace=rel['namespace'],
+        flags=flags,
+        **extra_kwargs
+    )
+
+# ─────────── monitoring (kube-prometheus-stack) ─────────────────────────────
+
+helm_release('kube-prometheus-stack', labels=['monitoring'])
+
+# Per-pod port-forwards. The helm_resource above bundles 5+ pods
+# (grafana, prometheus, operator, kube-state-metrics, node-exporter)
+# under one Tilt resource, so port_forwards on it picks an arbitrary
+# pod and you get empty replies when it's not the one you want.
+# Using extra_pod_selectors to bind the forward to a specific pod by
+# label is the documented workaround.
+k8s_resource(
+    new_name='grafana',
+    extra_pod_selectors=[{'app.kubernetes.io/name': 'grafana'}],
+    port_forwards=['3001:3000'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+k8s_resource(
+    new_name='prometheus',
+    extra_pod_selectors=[{'app.kubernetes.io/name': 'prometheus'}],
+    port_forwards=['9091:9090'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+local_resource(
+    'wait-prom-crds',
+    'kubectl wait --for condition=established --timeout=180s ' +
+        'crd/servicemonitors.monitoring.coreos.com',
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+# ─────────── envoy-gateway controller ───────────────────────────────────────
+
+helm_release('envoy-gateway', labels=['gateways'])
+
+local_resource(
+    'wait-eg-class',
+    'kubectl wait --for=condition=Accepted gatewayclass/eg --timeout=180s',
+    resource_deps=['envoy-gateway'],
+    labels=['gateways'],
+)
+
+# ─────────── universal services (image builds) ──────────────────────────────
+
+docker_build(
+    'cookbook/user-service',
+    '../..',
+    dockerfile='../../services/user-service/Dockerfile',
+    only=['go.mod', 'go.sum', 'pkg', 'services/user-service'],
+)
+
+docker_build(
+    'cookbook/catalog-service',
+    '../..',
+    dockerfile='../../services/catalog-service/Dockerfile',
+    only=['go.mod', 'go.sum', 'pkg', 'services/catalog-service'],
+)
+
+# ─────────── recipe manifests (services + gateway via kustomize) ────────────
+
+k8s_yaml(kustomize('../../deployments/k8s/recipes/envoy-gateway'))
+
+k8s_resource(
+    'user-service',
+    objects=[
+        'envoy-gateway:namespace',
+        'user-service:servicemonitor',
+    ],
+    resource_deps=['wait-prom-crds'],
+    labels=['workloads'],
+)
+
+k8s_resource(
+    'catalog-service',
+    objects=['catalog-service:servicemonitor'],
+    resource_deps=['wait-prom-crds'],
+    labels=['workloads'],
+)
+
+# Gateway data plane — Tilt port-forwards into the proxy pods via
+# envoy-gateway's well-known controller label.
+k8s_resource(
+    new_name='envoy-gateway-data-plane',
+    objects=['envoy-gateway:gateway', 'envoy-gateway-route:httproute'],
+    extra_pod_selectors=[
+        {'gateway.envoyproxy.io/owning-gateway-name': 'envoy-gateway'},
+    ],
+    port_forwards=['8082:10080'],
+    resource_deps=['user-service', 'catalog-service', 'wait-eg-class'],
+    labels=['gateways'],
+)
+
+# ─────────── grafana dashboard (single source of truth) ─────────────────────
+#
+# Canonical JSON lives at recipes/envoy-gateway/grafana/envoy-gateway.json.
+# Materialised as a ConfigMap with label `grafana_dashboard=1` so the
+# kube-prom Grafana sidecar auto-loads it.
+
+dashboard_cm_yaml = local(
+    'kubectl create configmap envoy-gateway-dashboard ' +
+    '--namespace=monitoring ' +
+    '--from-file=envoy-gateway.json=../../recipes/envoy-gateway/grafana/envoy-gateway.json ' +
+    '--dry-run=client -o yaml',
+    quiet=True,
+)
+k8s_yaml(dashboard_cm_yaml)
+k8s_resource(
+    new_name='envoy-gateway-dashboard',
+    objects=['envoy-gateway-dashboard:configmap'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+local_resource(
+    'label-dashboard-cm',
+    cmd='kubectl label --overwrite configmap envoy-gateway-dashboard ' +
+        '--namespace=monitoring grafana_dashboard=1',
+    resource_deps=['envoy-gateway-dashboard'],
+    labels=['monitoring'],
+)

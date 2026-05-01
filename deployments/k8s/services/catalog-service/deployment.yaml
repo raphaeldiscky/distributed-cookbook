@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-service
+  labels:
+    app: catalog-service
+    cookbook.service: catalog-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: catalog-service }
+  template:
+    metadata:
+      labels:
+        app: catalog-service
+        cookbook.service: catalog-service
+    spec:
+      containers:
+        - name: server
+          image: cookbook/catalog-service:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SERVICE_PORT
+              value: "8080"
+            - name: LOG_LEVEL
+              value: info
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits:   { cpu: 500m, memory: 128Mi }

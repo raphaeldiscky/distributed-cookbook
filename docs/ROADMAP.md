@@ -37,11 +37,12 @@ Status legend: ✅ shipped · 🚧 in progress · — planned
 
 | Recipe                | Status | Infra                | Teaches                                        |
 | --------------------- | ------ | -------------------- | ---------------------------------------------- |
-| `microservices`       | —      | 2–3 Go apps          | synchronous vs. async comms, error propagation |
-| `api-gateway`         | —      | envoy, kong, traefik | routing, auth, rate limit at the edge          |
-| `service-mesh-istio`  | —      | kind + istio         | sidecar mesh, mTLS, traffic shifting           |
-| `service-mesh-cilium` | —      | kind + cilium        | eBPF sidecarless mesh, Hubble observability    |
-| `grpc-vs-rest`        | —      | envoy                | streaming, multiplexing, interceptors          |
+| `microservices`       | —      | 2–3 Go apps                       | synchronous vs. async comms, error propagation |
+| `envoy-gateway`       | ✅     | kind (kindnet) + envoy-gateway    | reference K8s Gateway API impl; production-realistic single-gateway topology |
+| `cilium-gateway`      | ✅     | kind + Cilium (CNI + Gateway API) | one product (Cilium) does both networking and L7 ingress |
+| `service-mesh-istio`  | —      | kind + istio                      | sidecar mesh, mTLS, traffic shifting           |
+| `service-mesh-cilium` | —      | kind + cilium                     | eBPF sidecarless mesh, Hubble observability — distinct from `cilium-gateway` (which is just the gateway) |
+| `grpc-vs-rest`        | —      | envoy                             | streaming, multiplexing, interceptors          |
 
 ## Kubernetes-native
 

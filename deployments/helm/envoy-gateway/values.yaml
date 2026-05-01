@@ -1,0 +1,12 @@
+# Envoy Gateway helm values. The chart installs the controller and the
+# default `eg` GatewayClass. We just want metrics on for the dashboard.
+
+deployment:
+  replicas: 1
+
+config:
+  envoyGateway:
+    telemetry:
+      metrics:
+        prometheus:
+          disable: false

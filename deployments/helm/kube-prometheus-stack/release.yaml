@@ -1,0 +1,7 @@
+# Helm release manifest for kube-prometheus-stack
+# (Prometheus Operator + Prometheus + Grafana, sized for a kind cluster).
+chart: prometheus-community/kube-prometheus-stack
+repo: https://prometheus-community.github.io/helm-charts
+version: 84.4.0
+namespace: monitoring
+createNamespace: true

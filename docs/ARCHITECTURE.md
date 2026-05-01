@@ -22,33 +22,53 @@ concept, is load-testable with k6, and is observable in Grafana.
 
 ```
 distributed-cookbook/
-├── pkg/              # Shared Go packages (telemetry, pg, redis, http, config, logger)
+├── pkg/              # Shared Go libraries (telemetry, pg, redis, http, config, logger)
+├── services/         # Universal HTTP services reused across recipes
+│   └── <name>/
+│       ├── README.md
+│       ├── Dockerfile
+│       ├── cmd/server/main.go
+│       └── internal/…
 ├── recipes/          # One directory per recipe
 │   └── <name>/
 │       ├── RECIPE.md
-│       ├── cmd/server/main.go
-│       ├── internal/…
-│       ├── migrations/
+│       ├── cmd/server/main.go     # only when the recipe's own server IS the lesson
+│       ├── internal/…              # recipe-local code (when needed)
+│       ├── migrations/             # only when the recipe owns a Postgres schema
 │       ├── grafana/<name>.json
 │       └── loadtest/*.js
 ├── deployments/
-│   └── docker-compose/
-│       ├── network.yaml
-│       ├── postgres.yaml, redis.yaml, kafka.yaml, …   # atomic infra files
-│       ├── monitoring.yaml + monitoring/config/…
-│       └── recipes/<name>.stack.yaml                   # Compose `include:` glue
+│   ├── docker-compose/             # Mode A infra (compose recipes)
+│   │   ├── network.yaml
+│   │   ├── postgres.yaml, redis.yaml, kafka.yaml, …
+│   │   ├── monitoring.yaml + monitoring/config/…
+│   │   └── recipes/<name>.stack.yaml
+│   ├── k8s/                        # Mode B infra (K8s recipes)
+│   │   ├── services/<name>/        # reusable workload bases (kustomize)
+│   │   └── recipes/<name>/         # recipe-specific gateways/meshes/etc.
+│   └── helm/values/                # Helm values for K8s controllers
+├── Tiltfile                         # Local-K8s orchestrator (Mode B)
 ├── docs/             # THIS dir
 ├── scripts/
-└── taskfile.yml      # recipe-aware task runner targets
+└── taskfile.yml      # task runner targets for both modes
 ```
 
 ## Shared packages (`pkg/`)
 
 Only infrastructure primitives live here. Rule: if code would be
-byte-for-byte identical when imported from two recipes, it goes in `pkg/`.
-Domain-specific code never appears here. See
+byte-for-byte identical when imported from two recipes, it goes in
+`pkg/`. Domain-specific code never appears here. See
 [CONTRIBUTING.md → Where does new code live?](./CONTRIBUTING.md#where-does-new-code-live)
 for the decision tree.
+
+## Universal services (`services/`)
+
+Reusable HTTP workloads that recipes compose to demonstrate concepts
+*around* them (gateway routing, mesh policy, distributed tracing, …).
+A workload qualifies for `services/` when **2+ recipes can use it
+as-is**; otherwise it stays under `recipes/<name>/cmd/`. See
+[services/README.md](../services/README.md) for the contract every
+universal service follows (env vars, endpoints, metric namespace).
 
 | Package          | What it gives you                                                         |
 | ---------------- | ------------------------------------------------------------------------- |
@@ -105,11 +125,33 @@ short version:
 
 ## Deployment modes
 
-Today every recipe runs as a Go binary on the host plus docker-compose
-infra. Future recipes focused on Kubernetes/service-mesh concepts
-(`service-mesh-cilium`, `operators-controllers`, etc.) will add a
-parallel `deployments/kubernetes/` tree using `kind`. Each RECIPE.md
-declares which modes it supports.
+The cookbook supports two deployment modes; each recipe picks one.
+
+### Mode A — host Go binary + docker-compose (default)
+
+Used by `flashsale` and most planned recipes. The Go server runs on the
+host (via `task run RECIPE=<name>`, hot-reloaded by air) and connects
+to infra running in docker-compose (Postgres, Redis, the LGTM monitoring
+stack, …). Composition root is `recipes/<name>/cmd/server/main.go`.
+
+### Mode B — kind cluster + Helm + Tilt
+
+Used by `api-gateway` (the first such recipe) and planned for
+`service-mesh-cilium`, `service-mesh-istio`, `operators-controllers`,
+`kubernetes-basics`, `autoscaling`, `helm-kustomize`,
+`chaos-engineering`. The recipe's workloads are containerised and
+deployed to a local kind cluster. Gateway/mesh controllers and
+observability are installed via Helm; manifests live under
+`deployments/k8s/recipes/<name>/` (kustomize) and
+`deployments/helm/values/`. A repo-root `Tiltfile` orchestrates
+everything. Monitoring runs **inside** the kind cluster
+(`kube-prometheus-stack`).
+
+Mode-B recipes typically include reusable bases from
+`deployments/k8s/services/<name>/` rather than ship their own backend
+manifests — see "Universal services" above.
+
+Each RECIPE.md declares which mode it uses up front.
 
 ## Design patterns used
 

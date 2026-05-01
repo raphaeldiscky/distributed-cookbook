@@ -1,0 +1,13 @@
+# Helm release manifest for Envoy Gateway (K8s Gateway API
+# implementation, registers the `eg` GatewayClass).
+#
+# Used by the envoy-gateway recipe. The chart bundles its own copy of
+# the Gateway API CRDs; in this recipe's kind cluster (kindnet CNI, no
+# Cilium) there's no conflict, so we let the chart install them
+# normally. The cilium-gateway recipe takes a different path — it
+# pre-installs upstream Gateway API CRDs in scripts/kind-up.sh because
+# Cilium needs them present at agent startup.
+chart: oci://docker.io/envoyproxy/gateway-helm
+version: v1.6.7
+namespace: envoy-gateway-system
+createNamespace: true

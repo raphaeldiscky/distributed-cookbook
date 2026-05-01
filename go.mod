@@ -1,6 +1,6 @@
 module github.com/raphaeldiscky/distributed-cookbook
 
-go 1.25.9
+go 1.26.2
 
 require (
 	github.com/exaring/otelpgx v0.10.0

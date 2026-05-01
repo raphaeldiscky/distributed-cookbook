@@ -1,0 +1,105 @@
+{
+  "title": "Envoy Gateway",
+  "uid": "envoy-gateway",
+  "schemaVersion": 39,
+  "timezone": "",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "tags": ["recipe", "envoy-gateway"],
+  "description": "L7 ingress through Envoy Gateway. Hit the cluster's gateway with k6 (BASE_URL=http://localhost:8082) and watch latency, throughput, and error rate. Sibling recipe cilium-gateway emits the same metric shape with gateway=\"cilium\" so dashboards can be overlaid in a federated Grafana.",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Hero — p99 latency (k6 client side)",
+      "id": 1,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(k6_http_req_duration_p99{gateway=\"envoy-gateway\"})",
+          "legendFormat": "envoy-gateway p99",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99",
+      "id": 2,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        { "expr": "max(k6_http_req_duration_p50{gateway=\"envoy-gateway\"})", "legendFormat": "p50", "refId": "A" },
+        { "expr": "max(k6_http_req_duration_p95{gateway=\"envoy-gateway\"})", "legendFormat": "p95", "refId": "B" },
+        { "expr": "max(k6_http_req_duration_p99{gateway=\"envoy-gateway\"})", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput (requests/sec)",
+      "id": 3,
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "expr": "sum(rate(k6_http_reqs{gateway=\"envoy-gateway\"}[1m]))", "legendFormat": "RPS", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate (failed/sec)",
+      "id": 4,
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "sum(rate(k6_http_req_failed{gateway=\"envoy-gateway\"}[1m]))", "legendFormat": "failed", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Backend request rate by service (sanity)",
+      "id": 5,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "From user-service and catalog-service /metrics. Confirms load reaches both pods.",
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        { "expr": "sum(rate(cookbook_user_service_requests_total[1m]))", "legendFormat": "user-service", "refId": "A" },
+        { "expr": "sum(rate(cookbook_catalog_service_requests_total[1m]))", "legendFormat": "catalog-service", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Backend p99 handler latency (sanity)",
+      "id": 6,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Backend-side handler latency. If this is flat but the hero panel grows, the difference is gateway overhead.",
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(cookbook_user_service_request_duration_seconds_bucket[1m])))", "legendFormat": "user-service", "refId": "A" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(cookbook_catalog_service_request_duration_seconds_bucket[1m])))", "legendFormat": "catalog-service", "refId": "B" }
+      ]
+    }
+  ]
+}

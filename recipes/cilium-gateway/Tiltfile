@@ -1,0 +1,167 @@
+# Tiltfile for the cilium-gateway recipe.
+#
+# Cilium handles both CNI and Gateway API in one product. Cilium itself
+# is installed by `task kind_up RECIPE=cilium-gateway` (must be in
+# place before any pod can network); Tilt only brings up monitoring
+# plus the workloads + Gateway/HTTPRoute.
+#
+# Run via:
+#   task kind_up   RECIPE=cilium-gateway
+#   task tilt_up   RECIPE=cilium-gateway
+#
+# Docs: https://docs.tilt.dev/
+
+update_settings(max_parallel_updates=3, k8s_upsert_timeout_secs=300)
+
+allow_k8s_contexts(['kind-cookbook-cilium-gateway'])
+
+load('ext://helm_resource', 'helm_resource', 'helm_repo')
+
+# ─────────── helm release loader ────────────────────────────────────────────
+
+_registered_repos = {}
+
+def helm_release(name, **extra_kwargs):
+    """Install a helm chart from deployments/helm/<name>/{release,values}.yaml."""
+    rel = read_yaml('../../deployments/helm/{}/release.yaml'.format(name))
+
+    repo_url = rel.get('repo')
+    if repo_url and repo_url not in _registered_repos:
+        repo_name = rel['chart'].split('/')[0]
+        helm_repo(repo_name, repo_url, labels=['helm-repos'])
+        _registered_repos[repo_url] = True
+
+    flags = ['--version={}'.format(rel['version'])]
+    if rel.get('createNamespace'):
+        flags.append('--create-namespace')
+    flags.append('--values=../../deployments/helm/{}/values.yaml'.format(name))
+    if rel.get('skipCRDs'):
+        flags.append('--skip-crds')
+
+    helm_resource(
+        name,
+        rel['chart'],
+        namespace=rel['namespace'],
+        flags=flags,
+        **extra_kwargs
+    )
+
+# ─────────── monitoring ─────────────────────────────────────────────────────
+
+helm_release('kube-prometheus-stack', labels=['monitoring'])
+
+# Per-pod port-forwards. The helm_resource above bundles 5+ pods
+# (grafana, prometheus, operator, kube-state-metrics, node-exporter)
+# under one Tilt resource, so port_forwards on it picks an arbitrary
+# pod and you get empty replies when it's not the one you want.
+# Using extra_pod_selectors to bind the forward to a specific pod by
+# label is the documented workaround.
+k8s_resource(
+    new_name='grafana',
+    extra_pod_selectors=[{'app.kubernetes.io/name': 'grafana'}],
+    port_forwards=['3001:3000'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+k8s_resource(
+    new_name='prometheus',
+    extra_pod_selectors=[{'app.kubernetes.io/name': 'prometheus'}],
+    port_forwards=['9091:9090'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+local_resource(
+    'wait-prom-crds',
+    'kubectl wait --for condition=established --timeout=180s ' +
+        'crd/servicemonitors.monitoring.coreos.com',
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+# ─────────── cilium GatewayClass (already exists from kind_up) ──────────────
+#
+# Cilium itself was installed by scripts/kind-up.sh with
+# gatewayAPI.enabled=true. We just verify the GatewayClass is Accepted
+# before applying Gateway/HTTPRoute resources that reference it.
+local_resource(
+    'wait-cilium-class',
+    'kubectl wait --for=condition=Accepted gatewayclass/cilium --timeout=180s',
+    labels=['gateways'],
+)
+
+# ─────────── universal services (image builds) ──────────────────────────────
+
+docker_build(
+    'cookbook/user-service',
+    '../..',
+    dockerfile='../../services/user-service/Dockerfile',
+    only=['go.mod', 'go.sum', 'pkg', 'services/user-service'],
+)
+
+docker_build(
+    'cookbook/catalog-service',
+    '../..',
+    dockerfile='../../services/catalog-service/Dockerfile',
+    only=['go.mod', 'go.sum', 'pkg', 'services/catalog-service'],
+)
+
+# ─────────── recipe manifests (services + gateway via kustomize) ────────────
+
+k8s_yaml(kustomize('../../deployments/k8s/recipes/cilium-gateway'))
+
+k8s_resource(
+    'user-service',
+    objects=[
+        'cilium-gateway:namespace',
+        'user-service:servicemonitor',
+    ],
+    resource_deps=['wait-prom-crds'],
+    labels=['workloads'],
+)
+
+k8s_resource(
+    'catalog-service',
+    objects=['catalog-service:servicemonitor'],
+    resource_deps=['wait-prom-crds'],
+    labels=['workloads'],
+)
+
+# Gateway resources — passive registration with Tilt for status
+# visibility. NO Tilt port_forwards: Host Network mode binds the
+# Gateway listener (port 8080) directly on the kind node's network
+# namespace via cilium-envoy DaemonSet, and kind extraPortMappings
+# forwards host:8083 → kind container:8080. So the host can reach
+# http://localhost:8083 transparently without any Tilt forwarding.
+k8s_resource(
+    new_name='cilium-gateway-routes',
+    objects=['cilium-gateway:gateway', 'cilium-gateway-route:httproute'],
+    resource_deps=['user-service', 'catalog-service', 'wait-cilium-class'],
+    labels=['gateways'],
+)
+
+# ─────────── grafana dashboard ──────────────────────────────────────────────
+
+dashboard_cm_yaml = local(
+    'kubectl create configmap cilium-gateway-dashboard ' +
+    '--namespace=monitoring ' +
+    '--from-file=cilium-gateway.json=../../recipes/cilium-gateway/grafana/cilium-gateway.json ' +
+    '--dry-run=client -o yaml',
+    quiet=True,
+)
+k8s_yaml(dashboard_cm_yaml)
+k8s_resource(
+    new_name='cilium-gateway-dashboard',
+    objects=['cilium-gateway-dashboard:configmap'],
+    resource_deps=['kube-prometheus-stack'],
+    labels=['monitoring'],
+)
+
+local_resource(
+    'label-dashboard-cm',
+    cmd='kubectl label --overwrite configmap cilium-gateway-dashboard ' +
+        '--namespace=monitoring grafana_dashboard=1',
+    resource_deps=['cilium-gateway-dashboard'],
+    labels=['monitoring'],
+)

@@ -1,0 +1,23 @@
+# Cilium helm values shared across K8s-mode recipes that use Cilium.
+# Cilium is BOTH a cluster CNI AND a Gateway API implementation; recipes
+# decide which features to turn on.
+#
+# kubeProxyReplacement: true → Cilium replaces kube-proxy (the recipe's
+# kind cluster sets kubeProxyMode: none). Required by Cilium's gateway
+# API support.
+kubeProxyReplacement: true
+
+# Default OFF here so this values file is safe to share. The
+# cilium-gateway recipe overrides it via `--set gatewayAPI.enabled=true`
+# at install time in scripts/kind-up.sh. Other recipes that just want
+# Cilium-as-CNI (e.g. a hypothetical netpol recipe) leave it off.
+gatewayAPI:
+  enabled: false
+
+# Hubble (sidecarless mesh observability) is OFF — that's the job of a
+# future `service-mesh-cilium` recipe. cilium-gateway is gateway-only.
+hubble:
+  enabled: false
+
+operator:
+  replicas: 1

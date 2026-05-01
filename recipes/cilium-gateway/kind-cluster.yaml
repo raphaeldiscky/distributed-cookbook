@@ -1,0 +1,24 @@
+# kind cluster config for the cilium-gateway recipe.
+#
+# Cilium replaces both kindnet (default CNI) and kube-proxy. Disable
+# both at cluster bootstrap; scripts/kind-up.sh helm-installs Cilium
+# afterward with kubeProxyReplacement=true, gatewayAPI.enabled=true,
+# and gatewayAPI.hostNetwork.enabled=true (kind-recommended mode per
+# https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/ ).
+#
+# In host-network mode Cilium-Envoy binds the Gateway listener port
+# directly on the kind node's network namespace — no LB Service, no
+# NodePort. extraPortMappings forwards host:8083 → kind container:8080
+# (the listener port from gateway.yaml).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: cookbook-cilium-gateway
+networking:
+  disableDefaultCNI: true
+  kubeProxyMode: none
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 8080
+        hostPort: 8083
+        protocol: TCP
