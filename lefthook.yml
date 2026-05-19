@@ -1,0 +1,18 @@
+pre-commit:
+  commands:
+    format:
+      run: task format
+    lint:
+      run: task lint
+    stage:
+      run: git add -A .
+
+pre-push:
+  commands:
+    test:
+      run: task test
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}

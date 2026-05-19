@@ -67,12 +67,16 @@ fi
 # install node.js tools
 pnpm install
 
-# add husky hooks
-pnpm exec husky init
-cat > .husky/pre-commit << 'HOOK'
-task format && task lint && git add -A .
-HOOK
-cat > .husky/pre-push << 'HOOK'
-task test
-HOOK
-echo "pnpm exec commitlint --edit \$1" > .husky/commit-msg
+# install lefthook (git hooks manager) if missing — pinned via @vX.Y.Z
+if ! command -v lefthook >/dev/null 2>&1; then
+  if command -v go >/dev/null 2>&1; then
+    go install github.com/evilmartians/lefthook/v2@v2.1.8
+  else
+    echo "go not found on PATH; skipping lefthook install (git hooks will NOT be wired)"
+  fi
+fi
+
+# wire git hooks via lefthook (config lives in lefthook.yml)
+if command -v lefthook >/dev/null 2>&1; then
+  lefthook install
+fi
