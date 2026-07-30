@@ -102,6 +102,9 @@ linters:
           disabled: true
         - name: add-constant
           disabled: true
+        - name: unhandled-error
+          arguments:
+            - 'fmt\.Fprint.*'
     nolintlint:
       require-explanation: true
       require-specific: true
