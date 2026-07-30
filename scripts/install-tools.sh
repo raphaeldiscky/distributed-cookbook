@@ -17,7 +17,8 @@ fi
 
 if ! command -v golangci-lint &> /dev/null; then
     echo "Installing golangci-lint..."
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.4.0
+    # must be built with a Go >= the go directive in go.mod, else it refuses to load the config
+    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.12.2
 else
     echo "golangci-lint already installed"
 fi
