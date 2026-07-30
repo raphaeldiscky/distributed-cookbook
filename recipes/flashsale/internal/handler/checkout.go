@@ -19,6 +19,12 @@ import (
 	"github.com/raphaeldiscky/distributed-cookbook/recipes/flashsale/internal/service"
 )
 
+// Error strings returned in dto.ErrResp, shared by more than one handler.
+const (
+	errInvalidJSON     = "invalid json"
+	errProductNotFound = "product_not_found"
+)
+
 // Checkout wires the application service and logger into HTTP endpoints.
 type Checkout struct {
 	svc *service.Checkout
@@ -35,7 +41,7 @@ func NewCheckout(svc *service.Checkout, log *slog.Logger) *Checkout {
 func (h *Checkout) Post(c echo.Context) error {
 	var req dto.CheckoutReq
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "invalid json"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: errInvalidJSON})
 	}
 
 	if req.ProductID <= 0 || req.Qty <= 0 {
@@ -58,7 +64,7 @@ func (h *Checkout) Post(c echo.Context) error {
 	case errors.Is(err, domain.ErrOutOfStock):
 		return c.JSON(http.StatusConflict, dto.ErrResp{Error: "out_of_stock"})
 	case errors.Is(err, domain.ErrProductNotFound):
-		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: "product_not_found"})
+		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: errProductNotFound})
 	default:
 		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: err.Error()})
 	}
@@ -70,7 +76,7 @@ func (h *Checkout) Post(c echo.Context) error {
 func (h *Checkout) Seed(c echo.Context) error {
 	var req dto.SeedReq
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: "invalid json"})
+		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: errInvalidJSON})
 	}
 
 	if req.ProductID <= 0 || req.Stock < 0 {
@@ -111,7 +117,7 @@ func (h *Checkout) Stock(c echo.Context) error {
 			Adapter: string(resolvedKind),
 		})
 	case errors.Is(err, domain.ErrProductNotFound):
-		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: "product_not_found"})
+		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: errProductNotFound})
 	default:
 		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: err.Error()})
 	}

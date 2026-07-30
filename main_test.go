@@ -66,7 +66,7 @@ func TestMultiply(t *testing.T) {
 		b    int
 		want int
 	}{
-		{name: "positive numbers", a: 3, b: 4, want: 12},
+		{name: "both positive", a: 3, b: 4, want: 12},
 		{name: "negative and positive", a: -3, b: 4, want: -12},
 		{name: "both negative", a: -3, b: -4, want: 12},
 		{name: "multiply by zero", a: 5, b: 0, want: 0},
@@ -126,7 +126,7 @@ func TestAbs(t *testing.T) {
 	}{
 		{name: "positive", n: 5, want: 5},
 		{name: "negative", n: -5, want: 5},
-		{name: "zero", n: 0, want: 0},
+		{name: "zero stays zero", n: 0, want: 0},
 	}
 
 	for _, tt := range tests {

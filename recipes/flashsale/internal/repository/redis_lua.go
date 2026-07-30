@@ -97,7 +97,11 @@ func (a *RedisLuaAdapter) Seed(ctx context.Context, productID int64, name string
 		return fmt.Errorf("redis_lua: pg seed: %w", err)
 	}
 
-	if _, err := a.pool.Exec(ctx, `DELETE FROM flashsale.orders WHERE product_id = $1`, productID); err != nil {
+	if _, err := a.pool.Exec(
+		ctx,
+		`DELETE FROM flashsale.orders WHERE product_id = $1`,
+		productID,
+	); err != nil {
 		return fmt.Errorf("redis_lua: pg reset orders: %w", err)
 	}
 
