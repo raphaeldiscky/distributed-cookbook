@@ -50,7 +50,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tel, err := telemetry.New(ctx, telemetry.DefaultConfig(serviceName, cfg.Shared.OTLPEndpoint))
+	telCfg := telemetry.DefaultConfig(serviceName, cfg.Shared.OTLPEndpoint)
+	telCfg.TracingEnabled = cfg.Shared.TracingEnabled
+
+	tel, err := telemetry.New(ctx, telCfg)
 	if err != nil {
 		return fmt.Errorf("telemetry: %w", err)
 	}
@@ -74,13 +77,25 @@ func run() error {
 
 	defer closer.LogOnError(rdb, log, "redis")
 
-	// Build every Inventory implementation up front. The server holds all
-	// three and routes per-request via POST /checkout/:adapter. cfg.DefaultKind
-	// is the fallback when the client omits the :adapter path segment.
-	inventories := make(map[repository.Kind]repository.Inventory, 3)
+	// Build every Inventory implementation up front. The server holds all of
+	// them and routes per-request via POST /checkout/:adapter, so one process
+	// serves every adapter and a load test can switch between them without a
+	// restart. cfg.DefaultKind is the fallback when the client omits the
+	// :adapter path segment.
+	//
+	// ctx is the server's lifetime context, which KindGoChan's owner goroutine
+	// runs on until shutdown cancels it.
+	inventories := make(map[repository.Kind]repository.Inventory, len(repository.AllKinds))
 
-	for _, kind := range []repository.Kind{repository.KindNaive, repository.KindPgCond, repository.KindRedisLua} {
-		inv, err := repository.New(kind, pool, rdb)
+	deps := repository.Deps{
+		Pool:    pool,
+		Redis:   rdb,
+		Brokers: cfg.Shared.KafkaBrokers,
+		Log:     log,
+	}
+
+	for _, kind := range repository.AllKinds {
+		inv, err := repository.New(ctx, kind, deps)
 		if err != nil {
 			return fmt.Errorf("inventory %q: %w", kind, err)
 		}

@@ -6,4 +6,6 @@
 include:
   - path: ../postgres.yaml
   - path: ../redis.yaml
+  # token_queue records orders asynchronously through Kafka.
+  - path: ../kafka.yaml
   - path: ../monitoring.yaml

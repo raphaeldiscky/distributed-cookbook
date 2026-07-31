@@ -7,12 +7,18 @@ package metrics
 // one outcome into two different Prometheus series.
 type Outcome string
 
-// The four possible outcomes of a /checkout attempt.
+// The possible outcomes of a /checkout attempt.
+//
+// OutcomeRetryExhausted is distinct from OutcomeError on purpose: an
+// optimistic-locking adapter that runs out of retries has not hit a fault, it
+// has lost a race too many times. Folding that into `error` would hide a
+// contention signal inside a fault count.
 const (
-	OutcomeOK         Outcome = "ok"
-	OutcomeOutOfStock Outcome = "out_of_stock"
-	OutcomeNotFound   Outcome = "not_found"
-	OutcomeError      Outcome = "error"
+	OutcomeOK             Outcome = "ok"
+	OutcomeOutOfStock     Outcome = "out_of_stock"
+	OutcomeNotFound       Outcome = "not_found"
+	OutcomeError          Outcome = "error"
+	OutcomeRetryExhausted Outcome = "retry_exhausted"
 )
 
 // AllOutcomes is the canonical list — used by startup code to pre-touch
@@ -24,4 +30,5 @@ var AllOutcomes = []Outcome{
 	OutcomeOutOfStock,
 	OutcomeNotFound,
 	OutcomeError,
+	OutcomeRetryExhausted,
 }

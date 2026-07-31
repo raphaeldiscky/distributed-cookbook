@@ -244,6 +244,35 @@ this file is how architectural drift happens.
   most semantically-appropriate package (NOT a catch-all
   `constant/`).
 
+## 15. Kafka client: franz-go, not confluent-kafka-go / sarama / segmentio
+
+- **Chose:** `github.com/twmb/franz-go`
+- **Rejected:** `confluent-kafka-go`, `IBM/sarama`, `segmentio/kafka-go`
+- **Reason:** `confluent-kafka-go` wraps librdkafka through cgo, which
+  would end this repo's pure-Go builds and add a C toolchain to CI for
+  one recipe. franz-go covers the protocol features a recipe is likely to
+  reach for (consumer groups, transactions, incremental rebalancing), is
+  one module, and produces and consumes through a single `kgo.Client`
+  rather than two different APIs. sarama is widely deployed but its
+  consumer-group ergonomics are fiddly; segmentio/kafka-go is pleasant
+  and slower.
+- **Revisit trigger:** needing a Kafka feature franz-go has not
+  implemented, or matching a specific vendor client's behaviour.
+
+## 16. Single-node KRaft Kafka, not a replicated cluster
+
+- **Chose:** one `apache/kafka` node acting as broker and controller,
+  every internal topic at replication factor 1
+- **Rejected:** a three-broker cluster, and ZooKeeper
+- **Reason:** the recipes that need Kafka teach partition ordering,
+  consumer groups and at-least-once delivery, all of which one broker
+  demonstrates honestly. Three brokers would triple the memory on a
+  laptop to buy replication semantics no recipe currently measures.
+- **Known limitation, and any RECIPE.md leaning on Kafka should say so:**
+  a single broker cannot lose a follower, so nothing here exercises ISR
+  shrink, unclean leader election, or real `acks=all` durability.
+- **Revisit trigger:** a recipe about replication or broker failure.
+
 ---
 
 ## When to revise a decision

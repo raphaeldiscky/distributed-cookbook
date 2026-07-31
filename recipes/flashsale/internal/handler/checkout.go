@@ -65,6 +65,14 @@ func (h *Checkout) Post(c echo.Context) error {
 		return c.JSON(http.StatusConflict, dto.ErrResp{Error: "out_of_stock"})
 	case errors.Is(err, domain.ErrProductNotFound):
 		return c.JSON(http.StatusNotFound, dto.ErrResp{Error: errProductNotFound})
+	case errors.Is(err, domain.ErrRetryExhausted):
+		// 503 rather than 409: stock may remain and the buyer simply lost every
+		// race, so retrying is the right move. 409 would tell them to stop.
+		return c.JSON(http.StatusServiceUnavailable, dto.ErrResp{Error: "retry_exhausted"})
+	case errors.Is(err, domain.ErrUnavailable):
+		// A dependency is down. Nothing about the request was wrong, so the 400
+		// this used to fall through to was blaming the wrong party.
+		return c.JSON(http.StatusServiceUnavailable, dto.ErrResp{Error: "unavailable"})
 	default:
 		return c.JSON(http.StatusBadRequest, dto.ErrResp{Error: err.Error()})
 	}

@@ -5,24 +5,55 @@
 200 units in stock. Thousands of buyers click "buy" within seconds.
 Your naïve code records **250 orders**. You've oversold by 50 units.
 
-This recipe shows *why* that happens and *three* ways to fix it — with a
+This recipe shows *why* that happens and *ten* ways to respond — with a
 Grafana dashboard so you can watch the bug appear and disappear.
 
 ## The setup
 
-| Adapter | Mechanism | Correctness | Latency (expected) |
-|---|---|---|---|
-| `naive` | `SELECT` → check in Go → `UPDATE` with literal value | **broken** — two goroutines can read the same stock and both write the same new value | medium |
-| `pg_cond` | `UPDATE products SET stock = stock - $1 WHERE id = $2 AND stock >= $1` | correct — the WHERE clause and the write are atomic in one statement | medium |
-| `redis_lua` | Lua `EVAL` with atomic `GET`+`DECRBY` inside Redis' single-threaded loop | correct — Redis guarantees atomicity | lowest |
+Adapters are ordered by how hard they contend. The first six coordinate
+through one shared product row, pg_skip_locked turns stock into a row per unit,
+and the last four keep the authoritative counter outside Postgres. Strictness
+runs roughly the other way, and that inversion is the point of the recipe.
 
-All three adapters are **live on the same server**. Route per-request
+| Adapter | Mechanism | Correctness | Contention |
+|---|---|---|---|
+| `naive` | `SELECT` → check in Go → `UPDATE` with a literal value | **broken** — two goroutines read the same stock and both write the same new value | one row |
+| `pg_for_update` | `SELECT … FOR UPDATE` → check in Go → `UPDATE` | correct — the row lock is held across the whole read-check-write | one row, serialized |
+| `pg_cond` | `UPDATE products SET stock = stock - $1 WHERE id = $2 AND stock >= $1` | correct — the check and the write are atomic in one statement | one row |
+| `pg_advisory` | `pg_advisory_xact_lock(product_id)`, then read-check-write | correct — the gate is a lock-manager entry rather than the row itself | one advisory key |
+| `pg_optimistic` | read `(stock, version)`, then `UPDATE … WHERE version = $3`, retry on 0 rows | correct — losers retry, and give up after 5 attempts with `retry_exhausted` | one row, plus wasted retries |
+| `pg_serializable` | naive read-check-write at `SERIALIZABLE`, retry on SQLSTATE 40001 | correct — the engine spots the conflict instead of a version column | one row, plus wasted retries |
+| `pg_skip_locked` | one row per unit, claimed with `FOR UPDATE SKIP LOCKED` | correct — and the only Postgres adapter where buyers never wait on each other | one row **per unit** |
+| `redis_lua` | Lua `EVAL` with atomic `GET`+`DECRBY` inside Redis' single-threaded loop | correct — Redis guarantees atomicity, but the order insert is a dual write | one Redis key |
+| `redis_atomic` | bare `DECRBY`, compensating `INCRBY` when the result goes negative | correct — yet a crash between the two leaks units, so it can undersell | one Redis key |
+| `go_chan` | one owner goroutine holds the counter; checkouts ask it over a channel | correct **in one process only** — two replicas each sell the full stock | none, and no durability |
+| `token_queue` | grant from a per-replica in-memory quota, then record the order asynchronously through Kafka | **loosest** — quota fragments across replicas so it undersells, and orders are only eventually in Postgres | none on the hot path |
+
+`token_queue` is the shape large sales actually run, and it is both the fastest
+and the least strict adapter here. Fast because the sell/reject decision touches
+no shared row, no lock outside the process and no network, so rejections are
+nearly free, which is what matters when most buyers lose. Least strict because
+quota strands on replicas that sell out early, `200 OK` means durably queued
+rather than committed, and Kafka redelivery means every message needs an
+idempotency key. Rank the adapters by throughput and by strictness and the two
+orders are close to reversed.
+
+Kafka here is a single KRaft node (see `docs/DECISIONS.md` §16), so nothing in
+this recipe exercises ISR shrink, unclean leader election or real `acks=all`
+durability.
+
+Every adapter inserts the order row, so the comparison measures the same
+amount of work in every case.
+
+All eleven adapters are **live on the same server**. Route per-request
 via URL path — no restart needed to switch between them:
 
 ```bash
-curl -X POST localhost:8081/checkout/naive     -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
-curl -X POST localhost:8081/checkout/pg_cond   -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
-curl -X POST localhost:8081/checkout/redis_lua -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
+curl -X POST localhost:8081/checkout/naive         -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
+curl -X POST localhost:8081/checkout/pg_cond       -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
+curl -X POST localhost:8081/checkout/pg_for_update -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
+curl -X POST localhost:8081/checkout/pg_optimistic -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
+curl -X POST localhost:8081/checkout/go_chan       -d '{"product_id":1,"qty":1}' -H 'Content-Type: application/json'
 ```
 
 `POST /checkout` without a suffix uses whichever adapter

@@ -1,3 +1,8 @@
+// pg_for_update.go is this file plus FOR UPDATE on the SELECT. Keeping both
+// bodies whole is what makes that single-clause difference visible when the two
+// are read side by side, so the dupl check is waived here.
+//
+//nolint:dupl // near-identical to pg_for_update.go on purpose, see above
 package repository
 
 import (
@@ -15,6 +20,10 @@ import (
 // This is intentionally racy: two goroutines can both read stock=1, both compute
 // new=0, both write — two orders created when only one should be. This is the
 // "before" picture that the other adapters fix.
+//
+// PgForUpdateAdapter is this adapter plus FOR UPDATE on the SELECT. Both bodies
+// are kept whole rather than sharing a helper, so that single-clause difference
+// is visible side by side; see the dupl exemption at the top of this file.
 type NaiveAdapter struct {
 	pool *pgxpool.Pool
 }

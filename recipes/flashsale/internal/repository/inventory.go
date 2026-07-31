@@ -37,9 +37,42 @@ type Result struct {
 // the `adapter` Prometheus label, and env-var values.
 type Kind string
 
-// The three Inventory implementations this recipe ships.
+// The Inventory implementations this recipe ships.
+//
+// Ordered by how much they contend: the first six funnel every buyer onto one
+// shared product row, pg_skip_locked turns stock into a row per unit so buyers
+// never wait, and the last four keep the authoritative counter outside Postgres.
+// Strictness runs roughly the other way, which is the comparison this recipe
+// exists to make.
 const (
-	KindNaive    Kind = "naive"
-	KindPgCond   Kind = "pg_cond"
-	KindRedisLua Kind = "redis_lua"
+	KindNaive          Kind = "naive"
+	KindPgCond         Kind = "pg_cond"
+	KindPgForUpdate    Kind = "pg_for_update"
+	KindPgAdvisory     Kind = "pg_advisory"
+	KindPgOptimistic   Kind = "pg_optimistic"
+	KindPgSerializable Kind = "pg_serializable"
+	KindPgSkipLocked   Kind = "pg_skip_locked"
+	KindRedisLua       Kind = "redis_lua"
+	KindRedisAtomic    Kind = "redis_atomic"
+	KindGoChan         Kind = "go_chan"
+	KindTokenQueue     Kind = "token_queue"
 )
+
+// AllKinds is the canonical enumeration, used by the composition root to build
+// every adapter and pre-touch its metric series. Adding a Kind above without
+// adding it here would leave the adapter unreachable, so keep them together.
+//
+//nolint:gochecknoglobals // canonical enumeration, read-only
+var AllKinds = []Kind{
+	KindNaive,
+	KindPgCond,
+	KindPgForUpdate,
+	KindPgAdvisory,
+	KindPgOptimistic,
+	KindPgSerializable,
+	KindPgSkipLocked,
+	KindRedisLua,
+	KindRedisAtomic,
+	KindGoChan,
+	KindTokenQueue,
+}

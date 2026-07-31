@@ -10,7 +10,12 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      # Mount at /var/lib/postgresql, NOT /var/lib/postgresql/data. Since 18 the
+      # official images keep the cluster in a major-version subdirectory
+      # (/var/lib/postgresql/18/docker) so pg_upgrade --link works within a
+      # single mount point, and they refuse to boot when they find a volume at
+      # the old /data path. See docker-library/postgres#1259.
+      - pg_data:/var/lib/postgresql
     networks:
       - distributed-cookbook
     healthcheck:

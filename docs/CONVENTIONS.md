@@ -21,12 +21,21 @@ prevent runtime collisions.
 | 8084 | _unclaimed_ |   —    |
 | 8085 | _unclaimed_ |   —    |
 
+**Replica ports: 8091-8099.** A recipe that runs the same server several times
+over, to show per-replica state fragmenting or to put a balancer in front, takes
+its extra ports from 8091 upward via `RECIPE_<NAME>_PORT` rather than from the
+808x range. Those belong to future recipes, and squatting them would cost a later
+recipe its slot. `flashsale` uses 8091-8094 for its four-replica `token_queue`
+run.
+
 Infrastructure ports (not per recipe):
 
 |  Port | Service                     | Notes                                                         |
 | ----: | --------------------------- | ------------------------------------------------------------- |
 |  5433 | Postgres                    | remapped from 5432 to avoid collision with host Postgres      |
 |  6379 | Redis                       |                                                               |
+|  9092 | Kafka (bridge listener)     | `kafka:9092`, for containers on the shared network            |
+|  9094 | Kafka (host listener)       | **apps connect here** — `task run` builds a host binary        |
 |  3000 | Grafana                     | admin/admin                                                   |
 |  9090 | Prometheus                  |                                                               |
 |  3100 | Loki                        |                                                               |

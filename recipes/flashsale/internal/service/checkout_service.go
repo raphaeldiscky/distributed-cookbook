@@ -166,6 +166,16 @@ func (s *Checkout) Checkout(
 
 		return Result{}, decErr
 
+	case errors.Is(decErr, domain.ErrRetryExhausted):
+		// Counted apart from OutcomeError, and deliberately not logged: under
+		// heavy contention this is the expected loss path, so a log line per
+		// occurrence would bury everything else while the metric already says it.
+		s.metrics.CheckoutAttempts.
+			WithLabelValues(kindStr, string(metrics.OutcomeRetryExhausted)).Inc()
+		span.SetAttributes(attribute.String("outcome", string(metrics.OutcomeRetryExhausted)))
+
+		return Result{}, decErr
+
 	default:
 		s.metrics.CheckoutAttempts.WithLabelValues(kindStr, string(metrics.OutcomeError)).Inc()
 		s.log.ErrorContext(ctx, "checkout failed",
